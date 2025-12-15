@@ -5,6 +5,7 @@ import sys
 import warnings
 import math
 import logging
+import re
 
 import torch
 from transformers import StoppingCriteria
@@ -187,6 +188,7 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         top_k=1,
         temperature=0.01,
         repetition_penalty=1.0,
+        use_kv_cache: bool = True,
         use_custom_prompt: bool = True,
         system_prompt: str | None = None,
         post_process: bool = False,  # if True, will try to only extract stuff in the last \boxed{}.
@@ -207,6 +209,7 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             top_k=top_k,
             temperature=temperature,
             repetition_penalty=repetition_penalty,
+            use_cache=use_kv_cache,
         )
         self.system_prompt = system_prompt
         self.verbose = verbose
@@ -291,6 +294,8 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                 model_path, torch_dtype='auto', device_map="auto", attn_implementation='flash_attention_2'
             )
             self.model.eval()
+
+        self.enable_thinking_mode = kwargs.get('thinking_mode')
 
         torch.cuda.empty_cache()
 
@@ -435,6 +440,18 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                 raise ValueError(f"Invalid message type: {s['type']}, {s}")
         return content
 
+    def extract_answer_from_thinking_response(self, response):
+        # Use regular expression to find all content between <answer> and </answer> tags
+        answer_pattern = r'<answer>(.*?)</answer>'
+        matches = re.findall(answer_pattern, response, re.DOTALL)
+        
+        # If there are multiple matches, concatenate all of them into a single string
+        if matches:
+            return ''.join(matches)
+        
+        # If there is no match, return the original response as a fallback
+        return response
+
     def generate_inner_transformers(self, message, dataset=None):
         if listinstr(['omni'], self.model_path.lower()):
             try:
@@ -468,6 +485,21 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         if listinstr(['omni'], self.model_path.lower()):
             self.generate_kwargs['use_audio_in_video'] = self.use_audio_in_video
             self.generate_kwargs['return_audio'] = False
+
+        # import pdb;pdb.set_trace()
+        # inference point for the Qwen2.5-VL models
+        # print(self.generate_kwargs)
+
+        # self.generate_kwargs['enable_visionzip'] = True
+        # self.generate_kwargs['visionzip_ratio'] = 0.71
+
+
+        # self.generate_kwargs['enable_kdvz'] = True
+        # self.generate_kwargs['kdvz_ratio'] = 0.66
+        
+
+
+
         generated_ids = self.model.generate(
             **inputs,
             **self.generate_kwargs,
@@ -613,12 +645,24 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         return generated_text
 
     def generate_inner(self, message, dataset=None):
+        # import pdb;pdb.set_trace()
+        if self.enable_thinking_mode:
+            for i in range(len(message)):
+                if message[i]['type'] == 'text':
+                    message[i]['value'] += " First output the thinking process in <think> </think> tags and then output the final answer in <answer> </answer> tags."
+                    break
+
         if self.use_vllm:
-            return self.generate_inner_vllm(message, dataset=dataset)
+            response = self.generate_inner_vllm(message, dataset=dataset)
         elif self.use_lmdeploy:
-            return self.generate_inner_lmdeploy(message, dataset=dataset)
+            response = self.generate_inner_lmdeploy(message, dataset=dataset)
         else:
-            return self.generate_inner_transformers(message, dataset=dataset)
+            response = self.generate_inner_transformers(message, dataset=dataset)
+         
+        if self.enable_thinking_mode:
+            response = self.extract_answer_from_thinking_response(response)
+        
+        return response
 
 
 class Qwen2VLChatAguvis(Qwen2VLChat):
