@@ -1562,6 +1562,8 @@ qwen2vl_series = {
         min_pixels=1280 * 28 * 28,
         max_pixels=16384 * 28 * 28,
     ),
+
+
     "Qwen2.5-VL-3B-Instruct": partial(
         Qwen2VLChat,
         model_path="Qwen/Qwen2.5-VL-3B-Instruct",
@@ -1570,41 +1572,113 @@ qwen2vl_series = {
         use_custom_prompt=False,
     ),
 
-    "Qwen2.5-VL-3B-Instruct-VZ-71": partial(
+    "Qwen2.5-VL-7B-Instruct": partial(
         Qwen2VLChat,
-        model_path="Qwen/Qwen2.5-VL-3B-Instruct",
+        model_path="Qwen/Qwen2.5-VL-7B-Instruct",
         min_pixels=1280 * 28 * 28,
         max_pixels=16384 * 28 * 28,
         use_custom_prompt=False,
     ),
 
 
-    "Qwen2.5-VL-3B-Instruct-KD-66": partial(
+    "Qwen2.5-VL-3B-Instruct-VZ-55": partial(
         Qwen2VLChat,
         model_path="Qwen/Qwen2.5-VL-3B-Instruct",
         min_pixels=1280 * 28 * 28,
         max_pixels=16384 * 28 * 28,
         use_custom_prompt=False,
+        enable_visionzip=True,
+        visionzip_ratio=0.55,
+        enable_kdvz=False,
+        kdvz_ratio=0
     ),
 
-
-
-    "Qwen2.5-VL-3B-Instruct-Thinking-71": partial(
+    "Qwen2.5-VL-3B-Instruct-VZ-80": partial(
         Qwen2VLChat,
         model_path="Qwen/Qwen2.5-VL-3B-Instruct",
         min_pixels=1280 * 28 * 28,
         max_pixels=16384 * 28 * 28,
         use_custom_prompt=False,
-        thinking_mode=True,
+        enable_visionzip=True,
+        visionzip_ratio=0.8,
+        enable_kdvz=False,
+        kdvz_ratio=0
     ),
-    "Qwen2.5-VL-3B-Instruct-Thinking-KD": partial(
+
+    "Qwen2.5-VL-3B-Instruct-KD-50": partial(
         Qwen2VLChat,
         model_path="Qwen/Qwen2.5-VL-3B-Instruct",
         min_pixels=1280 * 28 * 28,
         max_pixels=16384 * 28 * 28,
         use_custom_prompt=False,
-        thinking_mode=True,
+        enable_visionzip=False,
+        visionzip_ratio=0,
+        enable_kdvz=True,
+        kdvz_ratio=0.5
     ),
+
+    "Qwen2.5-VL-3B-Instruct-KD-75": partial(
+        Qwen2VLChat,
+        model_path="Qwen/Qwen2.5-VL-3B-Instruct",
+        min_pixels=1280 * 28 * 28,
+        max_pixels=16384 * 28 * 28,
+        use_custom_prompt=False,
+        enable_visionzip=False,
+        visionzip_ratio=0,
+        enable_kdvz=True,
+        kdvz_ratio=0.75
+    ),
+
+
+    "Qwen2.5-VL-7B-Instruct-VZ-55": partial(
+        Qwen2VLChat,
+        model_path="Qwen/Qwen2.5-VL-7B-Instruct",
+        min_pixels=1280 * 28 * 28,
+        max_pixels=16384 * 28 * 28,
+        use_custom_prompt=False,
+        enable_visionzip=True,
+        visionzip_ratio=0.55,
+        enable_kdvz=False,
+        kdvz_ratio=0
+    ),
+
+    "Qwen2.5-VL-7B-Instruct-VZ-80": partial(
+        Qwen2VLChat,
+        model_path="Qwen/Qwen2.5-VL-7B-Instruct",
+        min_pixels=1280 * 28 * 28,
+        max_pixels=16384 * 28 * 28,
+        use_custom_prompt=False,
+        enable_visionzip=True,
+        visionzip_ratio=0.8,
+        enable_kdvz=False,
+        kdvz_ratio=0
+    ),
+
+    "Qwen2.5-VL-7B-Instruct-KD-50": partial(
+        Qwen2VLChat,
+        model_path="Qwen/Qwen2.5-VL-7B-Instruct",
+        min_pixels=1280 * 28 * 28,
+        max_pixels=16384 * 28 * 28,
+        use_custom_prompt=False,
+        enable_visionzip=False,
+        visionzip_ratio=0,
+        enable_kdvz=True,
+        kdvz_ratio=0.5
+    ),
+
+    "Qwen2.5-VL-7B-Instruct-KD-75": partial(
+        Qwen2VLChat,
+        model_path="Qwen/Qwen2.5-VL-7B-Instruct",
+        min_pixels=1280 * 28 * 28,
+        max_pixels=16384 * 28 * 28,
+        use_custom_prompt=False,
+        enable_visionzip=False,
+        visionzip_ratio=0,
+        enable_kdvz=True,
+        kdvz_ratio=0.75
+    ),
+
+
 
 
     "Qwen2.5-VL-3B-Instruct-AWQ": partial(
@@ -1614,13 +1688,7 @@ qwen2vl_series = {
         max_pixels=16384 * 28 * 28,
         use_custom_prompt=False,
     ),
-    "Qwen2.5-VL-7B-Instruct": partial(
-        Qwen2VLChat,
-        model_path="Qwen/Qwen2.5-VL-7B-Instruct",
-        min_pixels=1280 * 28 * 28,
-        max_pixels=16384 * 28 * 28,
-        use_custom_prompt=False,
-    ),
+    
     "Qwen2.5-VL-7B-Instruct-ForVideo": partial(
         Qwen2VLChat,
         model_path="Qwen/Qwen2.5-VL-7B-Instruct",

@@ -189,6 +189,10 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         temperature=0.01,
         repetition_penalty=1.0,
         use_kv_cache: bool = True,
+        enable_visionzip=False,
+        visionzip_ratio=0,
+        enable_kdvz=True,
+        kdvz_ratio=0.75,
         use_custom_prompt: bool = True,
         system_prompt: str | None = None,
         post_process: bool = False,  # if True, will try to only extract stuff in the last \boxed{}.
@@ -210,6 +214,10 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             temperature=temperature,
             repetition_penalty=repetition_penalty,
             use_cache=use_kv_cache,
+            enable_visionzip=enable_visionzip,
+            visionzip_ratio=visionzip_ratio,
+            enable_kdvz=enable_kdvz,
+            kdvz_ratio=kdvz_ratio
         )
         self.system_prompt = system_prompt
         self.verbose = verbose
@@ -492,13 +500,9 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
 
         # self.generate_kwargs['enable_visionzip'] = True
         # self.generate_kwargs['visionzip_ratio'] = 0.71
-
-
         # self.generate_kwargs['enable_kdvz'] = True
         # self.generate_kwargs['kdvz_ratio'] = 0.66
         
-
-
 
         generated_ids = self.model.generate(
             **inputs,
