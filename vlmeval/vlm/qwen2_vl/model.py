@@ -190,9 +190,18 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         repetition_penalty=1.0,
         use_kv_cache: bool = True,
         enable_visionzip=False,
-        visionzip_ratio=0,
-        enable_kdvz=True,
-        kdvz_ratio=0.75,
+        visionzip_ratio=0.0,
+        enable_kdvz=False,
+        kdvz_ratio=0.0,
+        enable_kd_prefill=False,
+        prefill_anchor='all',
+        prefill_ratio=0.0,
+        prefill_prune_after_layer=8,
+        enable_kd_decode=False,
+        decode_anchor='all',
+        decode_ratio=0.0,
+        decode_prune_window=50,
+        decode_prune_after_layer=8,
         use_custom_prompt: bool = True,
         system_prompt: str | None = None,
         post_process: bool = False,  # if True, will try to only extract stuff in the last \boxed{}.
@@ -217,7 +226,16 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             enable_visionzip=enable_visionzip,
             visionzip_ratio=visionzip_ratio,
             enable_kdvz=enable_kdvz,
-            kdvz_ratio=kdvz_ratio
+            kdvz_ratio=kdvz_ratio,
+            enable_kd_prefill=enable_kd_prefill,
+            prefill_anchor=prefill_anchor,
+            prefill_ratio=prefill_ratio,
+            prefill_prune_after_layer=prefill_prune_after_layer,
+            enable_kd_decode=enable_kd_decode,
+            decode_anchor=decode_anchor,
+            decode_ratio=decode_ratio,
+            decode_prune_window=decode_prune_window,
+            decode_prune_after_layer=decode_prune_after_layer,
         )
         self.system_prompt = system_prompt
         self.verbose = verbose
@@ -494,15 +512,6 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             self.generate_kwargs['use_audio_in_video'] = self.use_audio_in_video
             self.generate_kwargs['return_audio'] = False
 
-        # import pdb;pdb.set_trace()
-        # inference point for the Qwen2.5-VL models
-        # print(self.generate_kwargs)
-
-        # self.generate_kwargs['enable_visionzip'] = True
-        # self.generate_kwargs['visionzip_ratio'] = 0.71
-        # self.generate_kwargs['enable_kdvz'] = True
-        # self.generate_kwargs['kdvz_ratio'] = 0.66
-        
 
         generated_ids = self.model.generate(
             **inputs,

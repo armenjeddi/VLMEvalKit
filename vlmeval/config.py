@@ -1473,7 +1473,35 @@ hawkvl_series = {
     )
 }
 
+def get_bool_env(var_name, default=False):
+    value = os.environ.get(var_name, str(default))
+    return value.lower() in ["1", "true", "yes"]
+
 qwen2vl_series = {
+    "Qwen": partial(
+        Qwen2VLChat,
+        model_path=os.environ.get("model_path", "Qwen/Qwen2.5-VL-7B-Instruct"),
+        min_pixels=1280 * 28 * 28,
+        max_pixels=16384 * 28 * 28,
+        use_custom_prompt=False,
+        enable_visionzip=get_bool_env("enable_visionzip", False),
+        visionzip_ratio=float(os.environ.get("visionzip_ratio", 0.0)),
+
+        enable_kdvz=get_bool_env("enable_kdvz", False),
+        kdvz_ratio=float(os.environ.get("kdvz_ratio", 0.0)),
+
+        enable_kd_prefill=get_bool_env("enable_kd_prefill", False),
+        prefill_anchor=os.environ.get("prefill_anchor", "all"),
+        prefill_ratio=float(os.environ.get("prefill_ratio", 0.0)),
+        prefill_prune_after_layer=int(os.environ.get("prefill_prune_after_layer", 8)),
+
+        enable_kd_decode=get_bool_env("enable_kd_decode", False),
+        decode_anchor=os.environ.get("decode_anchor", "all"),
+        decode_ratio=float(os.environ.get("decode_ratio", 0.0)),
+        decode_prune_window=int(os.environ.get("decode_prune_window", 50)),
+        decode_prune_after_layer=int(os.environ.get("decode_prune_after_layer", 8))
+    ),
+
     "Qwen-VL-Max-20250813": partial(
         Qwen2VLAPI,
         model="qwen-vl-max-2025-08-13",
