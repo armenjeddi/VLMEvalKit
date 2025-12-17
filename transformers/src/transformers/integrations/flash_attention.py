@@ -21,6 +21,8 @@ def flash_attention_forward(
     scaling: Optional[float] = None,
     sliding_window: Optional[int] = None,
     softcap: Optional[float] = None,
+    enable_visionzip: bool = False,
+    enable_kdvz: bool = False,
     **kwargs,
 ) -> tuple[torch.Tensor, None]:
     if kwargs.get("output_attentions", False) or kwargs.get("head_mask") is not None:
@@ -81,4 +83,34 @@ def flash_attention_forward(
         **kwargs,
     )
 
-    return attn_output, None
+    if enable_visionzip:
+        with torch.no_grad():
+            import torch.nn.functional as F
+            q = query.permute(0, 2, 1, 3)  # [B, T, H, D] -> [B, H, T, D]
+            k = key.permute(0, 2, 1, 3)  # [B, T, H, D] -> [B, H, T, D]
+            attn_logits = torch.matmul(q, k.transpose(-1, -2))
+            attn_logits = attn_logits / (q.shape[-1] ** 0.5)  
+            attn_logits = F.softmax(attn_logits, dim=-1)  
+            return_k = k
+
+            attn_output = attn_output.squeeze(0)
+            attn_logits = attn_logits.squeeze(0)
+            return_k = return_k.squeeze(0)
+
+        torch.cuda.empty_cache()
+        return attn_output, attn_logits, return_k
+    
+    if enable_kdvz:
+        with torch.no_grad():
+            import torch.nn.functional as F
+            q = query.permute(0, 2, 1, 3)  # [B, T, H, D] -> [B, H, T, D]
+            k = key.permute(0, 2, 1, 3)  # [B, T, H, D] -> [B, H, T, D]
+
+            attn_output = attn_output.squeeze(0)
+            return_k = k.squeeze(0)
+
+        torch.cuda.empty_cache()
+
+        return attn_output, None, return_k
+
+    return attn_output, None, None

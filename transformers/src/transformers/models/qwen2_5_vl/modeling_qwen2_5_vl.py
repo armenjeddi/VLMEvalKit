@@ -199,13 +199,26 @@ class Qwen2_5_VLVisionAttention(nn.Module):
         cu_seqlens: torch.Tensor,
         rotary_pos_emb: Optional[torch.Tensor] = None,
         position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+        enable_visionzip: bool = False,
+        enable_kdvz: bool = False,
         **kwargs,
     ) -> torch.Tensor:
         seq_length = hidden_states.shape[0]
         query_states, key_states, value_states = (
             self.qkv(hidden_states).reshape(seq_length, 3, self.num_heads, -1).permute(1, 0, 2, 3).unbind(0)
         )
-        cos, sin = position_embeddings
+        if position_embeddings is None:
+            logger.warning_once(
+                "The attention layers in this model are transitioning from computing the RoPE embeddings internally "
+                "through `rotary_pos_emb` (2D tensor of RoPE theta values), to using externally computed "
+                "`position_embeddings` (Tuple of tensors, containing cos and sin). In v4.54 `rotary_pos_emb` will be "
+                "removed and `position_embeddings` will be mandatory."
+            )
+            emb = torch.cat((rotary_pos_emb, rotary_pos_emb), dim=-1)
+            cos = emb.cos()
+            sin = emb.sin()
+        else:
+            cos, sin = position_embeddings
         query_states, key_states = apply_rotary_pos_emb_vision(query_states, key_states, cos, sin)
 
         query_states = query_states.transpose(0, 1).unsqueeze(0)
@@ -219,7 +232,8 @@ class Qwen2_5_VLVisionAttention(nn.Module):
         if self.config._attn_implementation == "flash_attention_2":
             # Flash Attention 2: Use cu_seqlens for variable length attention
             max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max()
-            attn_output, _ = attention_interface(
+
+            attn_output, attn_weights, k = attention_interface(
                 self,
                 query_states,
                 key_states,
@@ -232,8 +246,11 @@ class Qwen2_5_VLVisionAttention(nn.Module):
                 max_length_q=max_seqlen,
                 max_length_k=max_seqlen,
                 is_causal=False,
+                enable_visionzip=enable_visionzip,
+                enable_kdvz=enable_kdvz,
                 **kwargs,
             )
+            
         else:
             # Other implementations: Process each chunk separately
             lengths = cu_seqlens[1:] - cu_seqlens[:-1]
@@ -259,7 +276,13 @@ class Qwen2_5_VLVisionAttention(nn.Module):
 
         attn_output = attn_output.reshape(seq_length, -1).contiguous()
         attn_output = self.proj(attn_output)
-        return attn_output
+
+        # if enable_visionzip:
+        #     return attn_output, attn_weights, k
+        # elif enable_kdvz:
+        #     return attn_output, None, k
+
+        return attn_output, attn_weights, k
 
 
 class Qwen2_5_VLVisionBlock(GradientCheckpointingLayer):
@@ -276,17 +299,22 @@ class Qwen2_5_VLVisionBlock(GradientCheckpointingLayer):
         cu_seqlens: torch.Tensor,
         rotary_pos_emb: Optional[torch.Tensor] = None,
         position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+        enable_visionzip: bool = False,
+        enable_kdvz: bool = False,
         **kwargs,
     ) -> torch.Tensor:
-        hidden_states = hidden_states + self.attn(
+        attn, logits, attn_key = self.attn(
             self.norm1(hidden_states),
             cu_seqlens=cu_seqlens,
             rotary_pos_emb=rotary_pos_emb,
             position_embeddings=position_embeddings,
+            enable_visionzip=enable_visionzip,
+            enable_kdvz=enable_kdvz,
             **kwargs,
         )
+        hidden_states = hidden_states + attn
         hidden_states = hidden_states + self.mlp(self.norm2(hidden_states))
-        return hidden_states
+        return hidden_states, logits, attn_key
 
 
 @auto_docstring
@@ -403,7 +431,7 @@ class Qwen2_5_VisionTransformerPretrainedModel(Qwen2_5_VLPreTrainedModel):
 
         return window_index, cu_window_seqlens
 
-    def forward(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor, enable_visionzip=False, enable_kdvz=False, **kwargs) -> torch.Tensor:
         """
         Args:
             hidden_states (`torch.Tensor` of shape `(seq_len, hidden_size)`):
@@ -443,25 +471,50 @@ class Qwen2_5_VisionTransformerPretrainedModel(Qwen2_5_VLPreTrainedModel):
             dtype=grid_thw.dtype if torch.jit.is_tracing() else torch.int32,
         )
         cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0)
-
+        len_blocks = len(self.blocks)
         for layer_num, blk in enumerate(self.blocks):
             if layer_num in self.fullatt_block_indexes:
                 cu_seqlens_now = cu_seqlens
             else:
                 cu_seqlens_now = cu_window_seqlens
 
-            hidden_states = blk(
-                hidden_states,
-                cu_seqlens=cu_seqlens_now,
-                position_embeddings=position_embeddings,
-                **kwargs,
-            )
+            if layer_num == len_blocks - 1 and (enable_visionzip or enable_kdvz):
+                hidden_states, logits, attn_key = blk(
+                    hidden_states,
+                    cu_seqlens=cu_seqlens_now,
+                    position_embeddings=position_embeddings,
+                    enable_visionzip=enable_visionzip,
+                    enable_kdvz=enable_kdvz,
+                    **kwargs,
+                )
+            else:
+                hidden_states, _, _ = blk(
+                    hidden_states,
+                    cu_seqlens=cu_seqlens_now,
+                    position_embeddings=position_embeddings,
+                    **kwargs,
+                )
 
         hidden_states = self.merger(hidden_states)
         reverse_indices = torch.argsort(window_index)
         hidden_states = hidden_states[reverse_indices, :]
 
-        return hidden_states
+        if enable_visionzip:
+            with torch.no_grad():
+                attn_mean = logits.mean(dim=0)  
+                attn_mean = attn_mean.sum(dim=0)
+                attn_mean = attn_mean.view(attn_mean.shape[0]//4, -1).mean(dim=-1)
+                attn_mean = attn_mean[reverse_indices]
+                attn_key = attn_key.view(attn_key.shape[0], attn_key.shape[1]//4, 4, attn_key.shape[-1]).mean(dim=2)
+                attn_key = attn_key[:, reverse_indices, :].mean(dim=0).unsqueeze(0)
+            return hidden_states, attn_mean, attn_key
+        elif enable_kdvz:
+            with torch.no_grad():
+                attn_key = attn_key.view(attn_key.shape[0], attn_key.shape[1]//4, 4, attn_key.shape[-1]).mean(dim=2)
+                attn_key = attn_key[:, reverse_indices, :].mean(dim=0).unsqueeze(0)
+            return hidden_states, None, attn_key
+
+        return hidden_states, None, None
 
 
 @dataclass
@@ -473,7 +526,8 @@ class Qwen2_5_VisionTransformerPretrainedModel(Qwen2_5_VLPreTrainedModel):
 class Qwen2_5_VLModelOutputWithPast(ModelOutput):
     r"""
     past_key_values (`Cache`, *optional*, returned when `use_cache=True` is passed or when `config.use_cache=True`):
-        It is a [`~cache_utils.Cache`] instance. For more details, see our [kv cache guide](https://huggingface.co/docs/transformers/en/kv_cache).
+        Tuple of `tuple(torch.FloatTensor)` of length `config.n_layers`, with each tuple having 2 tensors of shape
+        `(batch_size, num_heads, sequence_length, embed_size_per_head)`)
 
         Contains pre-computed hidden-states (key and values in the self-attention blocks) that can be used (see
         `past_key_values` input) to speed up sequential decoding.
@@ -481,8 +535,8 @@ class Qwen2_5_VLModelOutputWithPast(ModelOutput):
         The rope index difference between sequence length and multimodal rope.
     """
 
-    last_hidden_state: Optional[torch.FloatTensor] = None
-    past_key_values: Optional[Cache] = None
+    last_hidden_state: torch.FloatTensor = None
+    past_key_values: Optional[list[torch.FloatTensor]] = None
     hidden_states: Optional[tuple[torch.FloatTensor]] = None
     attentions: Optional[tuple[torch.FloatTensor]] = None
     rope_deltas: Optional[torch.LongTensor] = None
@@ -663,7 +717,7 @@ class Qwen2_5_VLAttention(nn.Module):
         if self.config._attn_implementation != "eager":
             attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
-        attn_output, attn_weights = attention_interface(
+        attn_output, attn_weights, _ = attention_interface(
             self,
             query_states,
             key_states,
@@ -704,7 +758,7 @@ class Qwen2_5_VLDecoderLayer(GradientCheckpointingLayer):
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Cache] = None,
+        past_key_values: Optional[tuple[torch.Tensor]] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
@@ -722,7 +776,7 @@ class Qwen2_5_VLDecoderLayer(GradientCheckpointingLayer):
             use_cache (`bool`, *optional*):
                 If set to `True`, `past_key_values` key value states are returned and can be used to speed up decoding
                 (see `past_key_values`).
-            past_key_values (`Cache`, *optional*): cached past key and value projection states
+            past_key_values (`Tuple(torch.FloatTensor)`, *optional*): cached past key and value projection states
             cache_position (`torch.LongTensor` of shape `(sequence_length)`, *optional*):
                 Indices depicting the position of the input sequence tokens in the sequence.
             position_embeddings (`tuple[torch.FloatTensor, torch.FloatTensor]`, *optional*):
@@ -774,6 +828,8 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
+        self.decoded_tokens = 0
+
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList(
             [Qwen2_5_VLDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
@@ -800,6 +856,16 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        number_of_text_tokens: Optional[int] = None,
+        enable_kd_prefill: Optional[bool] = None,
+        prefill_anchor: Optional[str] = None,
+        prefill_ratio: Optional[float] = None,
+        prefill_prune_after_layer: Optional[int] = None,
+        enable_kd_decode: Optional[bool] = None,
+        decode_anchor: Optional[str] = None,
+        decode_ratio: Optional[float] = None,
+        decode_prune_window: Optional[int] = None,
+        decode_prune_after_layer: Optional[int] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Union[tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -853,8 +919,7 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
             text_position_ids = position_ids[0]
             position_ids = position_ids[1:]
         else:
-            # If inputs are not packed (usual 3D positions), do not prepare mask from position_ids
-            text_position_ids = None
+            text_position_ids = position_ids[0]
 
         # It may already have been prepared by e.g. `generate`
         if not isinstance(causal_mask_mapping := attention_mask, dict):
@@ -884,7 +949,11 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
         all_hidden_states = () if output_hidden_states else None
         all_self_attns = () if output_attentions else None
 
-        for decoder_layer in self.layers:
+
+        prefilling = hidden_states.shape[1] > 1
+        # print(prefilling)
+
+        for i, decoder_layer in enumerate(self.layers):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
@@ -902,10 +971,104 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
 
             hidden_states = layer_outputs[0]
 
+            if enable_kd_prefill and i >= prefill_prune_after_layer and prefilling and past_key_values is not None:
+                self.decoded_tokens = 0
+                # q_len = hidden_states.shape[1]
+
+                # _last_pos = cache_position[-1] if cache_position.ndim == 1 else cache_position[:, -1].max()
+                # if _last_pos <= q_len:
+                
+                module = getattr(decoder_layer, "self_attn", None)
+
+                cache = past_key_values
+                cache_layer = cache.layers[module.layer_idx]
+
+                keys = cache_layer.keys
+                values = cache_layer.values 
+                bsz, num_kv_heads, seq_len, head_dim = keys.shape
+
+
+                number_of_vision_tokens = seq_len - number_of_text_tokens
+
+                vision_keys = keys[:, :, :number_of_vision_tokens, :]
+                text_keys = keys[:, :, number_of_vision_tokens:, :]
+                if prefill_anchor == "vision":
+                    anchor = F.normalize(vision_keys, p=2, dim=-1).mean(2, keepdim=True)
+                elif prefill_anchor == "text":
+                    anchor = F.normalize(text_keys, p=2, dim=-1).mean(2, keepdim=True)
+                elif prefill_anchor == "all":
+                    anchor = F.normalize(keys, p=2, dim=-1).mean(2, keepdim=True)    
+
+                norm_vis = F.normalize(vision_keys, p=2, dim=-1)
+                scores = -F.cosine_similarity(norm_vis, anchor, dim=-1)
+
+                n_keep_vis = int(number_of_vision_tokens * (1.0 - prefill_ratio))
+
+                global_scores = scores.mean(dim=(0, 1))
+                vis_keep_idx = global_scores.topk(n_keep_vis, largest=True).indices
+
+                txt_idx = torch.arange(number_of_vision_tokens, seq_len, device=keys.device, dtype=torch.long)
+
+                keep_idx = torch.cat([vis_keep_idx, txt_idx], dim=0)
+                keep_idx, _ = keep_idx.sort()
+
+                L_kept = keep_idx.numel() 
+                gather_idx = keep_idx.view(1, 1, L_kept, 1).expand(bsz, num_kv_heads, L_kept, head_dim).contiguous() 
+
+                keys_new = keys.gather(2, gather_idx).contiguous() 
+                values_new = values.gather(2, gather_idx).contiguous() 
+
+                cache_layer.keys = keys_new 
+                cache_layer.values = values_new
+
+
+            if enable_kd_decode and self.decoded_tokens > 0 and self.decoded_tokens % decode_prune_window == 0 and i >= decode_prune_after_layer and past_key_values is not None:
+                module = getattr(decoder_layer, "self_attn", None)
+
+                cache = past_key_values
+                cache_layer = cache.layers[module.layer_idx]
+
+                keys = cache_layer.keys
+                values = cache_layer.values 
+                bsz, num_kv_heads, seq_len, head_dim = keys.shape
+                
+                history_len = seq_len - decode_prune_window
+
+                history_keys = keys[:, :, :history_len, :]
+                recent_keys = keys[:, :, history_len:, :]
+                if decode_anchor == "all":
+                    anchor = F.normalize(keys, p=2, dim=-1).mean(2, keepdim=True)
+                elif decode_anchor == "recent":
+                    anchor = F.normalize(recent_keys, p=2, dim=-1).mean(2, keepdim=True)
+
+                norm_vis = F.normalize(history_keys, p=2, dim=-1)
+                scores = -F.cosine_similarity(norm_vis, anchor, dim=-1)
+
+                n_keep_history = int(history_len * (1.0 - decode_ratio))
+
+                global_scores = scores.mean(dim=(0, 1))
+                history_keep_idx = global_scores.topk(n_keep_history, largest=True).indices
+
+                recent_idx = torch.arange(history_len, seq_len, device=keys.device, dtype=torch.long)
+
+                keep_idx = torch.cat([history_keep_idx, recent_idx], dim=0)
+                keep_idx, _ = keep_idx.sort()
+
+                L_kept = keep_idx.numel() 
+                gather_idx = keep_idx.view(1, 1, L_kept, 1).expand(bsz, num_kv_heads, L_kept, head_dim).contiguous() 
+
+                keys_new = keys.gather(2, gather_idx).contiguous() 
+                values_new = values.gather(2, gather_idx).contiguous() 
+
+                cache_layer.keys = keys_new 
+                cache_layer.values = values_new
+
+
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
 
         hidden_states = self.norm(hidden_states)
+        self.decoded_tokens += 1     
 
         # add hidden states from the last decoder layer
         if output_hidden_states:
@@ -1021,8 +1184,8 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         mrope_position_deltas = []
         if input_ids is not None and (image_grid_thw is not None or video_grid_thw is not None):
             total_input_ids = input_ids
-            if attention_mask is not None:
-                attention_mask = attention_mask == 1
+            if attention_mask is None:
+                attention_mask = torch.ones_like(total_input_ids)
             position_ids = torch.ones(
                 3,
                 input_ids.shape[0],
@@ -1031,9 +1194,9 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                 device=input_ids.device,
             )
             image_index, video_index = 0, 0
+            attention_mask = attention_mask.to(total_input_ids.device)
             for i, input_ids in enumerate(total_input_ids):
-                if attention_mask is not None:
-                    input_ids = input_ids[attention_mask[i]]
+                input_ids = input_ids[attention_mask[i] == 1]
                 image_nums, video_nums = 0, 0
                 vision_start_indices = torch.argwhere(input_ids == vision_start_token_id).squeeze(1)
                 vision_tokens = input_ids[vision_start_indices + 1]
@@ -1110,12 +1273,9 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                     llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
 
                 llm_positions = torch.cat(llm_pos_ids_list, dim=1).reshape(3, -1)
-                if attention_mask is not None:
-                    position_ids[..., i, attention_mask[i]] = llm_positions.to(position_ids.device)
-                else:
-                    position_ids[..., i, :] = llm_positions.to(position_ids.device)
+                position_ids[..., i, attention_mask[i] == 1] = llm_positions.to(position_ids.device)
                 mrope_position_deltas.append(llm_positions.max() + 1 - len(total_input_ids[i]))
-            mrope_position_deltas = torch.tensor(mrope_position_deltas).unsqueeze(1).to(device=input_ids.device)
+            mrope_position_deltas = torch.tensor(mrope_position_deltas, device=input_ids.device).unsqueeze(1)
             return position_ids, mrope_position_deltas
         else:
             if attention_mask is not None:
@@ -1156,7 +1316,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         video_embeds = torch.split(video_embeds, split_sizes)
         return video_embeds
 
-    def get_image_features(self, pixel_values: torch.FloatTensor, image_grid_thw: Optional[torch.LongTensor] = None):
+    def get_image_features(self, pixel_values: torch.FloatTensor, image_grid_thw: Optional[torch.LongTensor] = None, enable_visionzip=False, enable_kdvz=False):
         """
         Encodes images into continuous embeddings that can be forwarded to the language model.
 
@@ -1167,17 +1327,21 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                 The temporal, height and width of feature shape of each image in LLM.
         """
         pixel_values = pixel_values.type(self.visual.dtype)
-        image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
+        image_embeds, attn_logits, attn_key = self.visual(pixel_values, enable_visionzip=enable_visionzip, enable_kdvz=enable_kdvz, grid_thw=image_grid_thw)
+        
+        # image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
+
         split_sizes = (image_grid_thw.prod(-1) // self.visual.spatial_merge_size**2).tolist()
         image_embeds = torch.split(image_embeds, split_sizes)
-        return image_embeds
+        return image_embeds, attn_logits, attn_key
+        # return image_embeds
 
     def get_placeholder_mask(
         self,
         input_ids: torch.LongTensor,
         inputs_embeds: torch.FloatTensor,
-        image_features: Optional[torch.FloatTensor] = None,
-        video_features: Optional[torch.FloatTensor] = None,
+        image_features: torch.FloatTensor = None,
+        video_features: torch.FloatTensor = None,
     ):
         """
         Obtains multimodal placeholder mask from `input_ids` or `inputs_embeds`, and checks that the placeholder token count is
@@ -1215,7 +1379,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
     @auto_docstring
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
+        input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Cache] = None,
@@ -1231,6 +1395,19 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         rope_deltas: Optional[torch.LongTensor] = None,
         cache_position: Optional[torch.LongTensor] = None,
         second_per_grid_ts: Optional[torch.Tensor] = None,
+        enable_visionzip: Optional[bool] = None,
+        visionzip_ratio: Optional[float] = None,
+        enable_kdvz: Optional[bool] = None,
+        kdvz_ratio: Optional[float] = None,
+        enable_kd_prefill: Optional[bool] = None,
+        prefill_anchor: Optional[str] = None,
+        prefill_ratio: Optional[float] = None,
+        prefill_prune_after_layer: Optional[int] = None,
+        enable_kd_decode: Optional[bool] = None,
+        decode_anchor: Optional[str] = None,
+        decode_ratio: Optional[float] = None,
+        decode_prune_window: Optional[int] = None,
+        decode_prune_after_layer: Optional[int] = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, Qwen2_5_VLModelOutputWithPast]:
         r"""
@@ -1253,13 +1430,21 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.get_input_embeddings()(input_ids)
 
+        # print(input_ids)
+        number_of_text_tokens = None
+        select_pixel = False
         if pixel_values is not None:
-            image_embeds = self.get_image_features(pixel_values, image_grid_thw)
+            select_pixel = True
+
+            image_embeds, attn_logits, attn_key = self.get_image_features(pixel_values, enable_visionzip=enable_visionzip, enable_kdvz=enable_kdvz, image_grid_thw=image_grid_thw)
             image_embeds = torch.cat(image_embeds, dim=0).to(inputs_embeds.device, inputs_embeds.dtype)
             image_mask, _ = self.get_placeholder_mask(
                 input_ids, inputs_embeds=inputs_embeds, image_features=image_embeds
             )
             inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
+
+
+            number_of_text_tokens = inputs_embeds.shape[1] - image_embeds.shape[0]
 
         if pixel_values_videos is not None:
             video_embeds = self.get_video_features(pixel_values_videos, video_grid_thw)
@@ -1300,8 +1485,88 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                 else:
                     delta = torch.zeros((batch_size, seq_length), device=inputs_embeds.device)
                 delta = delta.repeat_interleave(batch_size // delta.shape[0], dim=1)
-                position_ids = position_ids + delta.to(position_ids.device)
+                position_ids += delta.to(position_ids.device)
 
+        # print('inputs_embeds.shape before visionzip:', inputs_embeds.shape)
+        if select_pixel and enable_visionzip:
+            dominant_tokens_ratio = 1 - visionzip_ratio
+            dominant_num = int(dominant_tokens_ratio * attn_logits.size(0))
+            contextual_num = max(int(0.05 * attn_logits.size(0)),1)
+            topk_values, topk_indices = torch.topk(attn_logits, dominant_num)
+            mask = torch.zeros_like(attn_logits, dtype=torch.bool)
+            mask[topk_indices] = True  
+            contextual_mask = ~mask
+            metric_filtered = attn_key[:,contextual_mask]
+            metric_normalized = metric_filtered / metric_filtered.norm(dim=-1, keepdim=True)
+            del attn_key, metric_filtered
+
+            ## Contextual Visual Tokens
+            step = max(1, metric_normalized.shape[1] // contextual_num)
+            target_indices = torch.arange(0, metric_normalized.shape[1], step, device=metric_normalized.device)[:contextual_num]
+            target_tokens = metric_normalized[:, target_indices, :]
+            tokens_to_merge = metric_normalized[:, ~torch.isin(torch.arange(metric_normalized.shape[1], device=metric_normalized.device), target_indices), :]
+            similarity = torch.bmm(tokens_to_merge, target_tokens.transpose(1, 2))
+            assign_one_hot = torch.zeros(tokens_to_merge.shape[0], tokens_to_merge.shape[1], contextual_num, dtype=attn_logits.dtype, device=metric_normalized.device)
+            assign_one_hot.scatter_(2, similarity.argmax(dim=2).unsqueeze(-1), 1)
+            counts = assign_one_hot.sum(dim=1).clamp(min=1).unsqueeze(-1)
+            select_mask = torch.zeros_like(attn_logits, dtype=torch.bool)
+            select_mask[topk_indices] = True
+            false_pos = (~select_mask).nonzero(as_tuple=True)[0]  
+            select_mask[false_pos[target_indices]] = True
+            img_mask = (input_ids == self.config.image_token_id)[0]  
+            st_idx = torch.nonzero(img_mask, as_tuple=True)[0]        
+            if st_idx.numel() > 0:
+                first, last = st_idx[0].item(), st_idx[-1].item()    
+                img_mask[first:last+1] = ~select_mask
+                img_mask = ~img_mask
+                contexual_input_idx = false_pos[target_indices]+first
+            hidden_states_filtered = inputs_embeds[:, first:last+1][:,contextual_mask]
+            hidden_to_merge = hidden_states_filtered[:, ~torch.isin(torch.arange(hidden_states_filtered.shape[1], device=hidden_states_filtered.device), target_indices), :]
+            aggregated_hidden = torch.bmm(assign_one_hot.transpose(1, 2), hidden_to_merge) / counts
+            target_hidden = hidden_states_filtered[:, target_indices, :]  
+            
+            contextual_tokens = target_hidden + aggregated_hidden
+            position_ids = position_ids[:,:,img_mask]
+            attention_mask = attention_mask[:, img_mask]
+            inputs_embeds[:,contexual_input_idx] =  contextual_tokens
+            inputs_embeds = inputs_embeds[:, img_mask]
+            del contextual_tokens, hidden_states_filtered, hidden_to_merge,aggregated_hidden
+
+        
+        if select_pixel and enable_kdvz:
+            # inputs_embeds shape: 1, num_tokens, embed_dim
+            # attn_key shape: 1, num_tokens, key_dim
+            
+            num_tokens = attn_key.size(1)
+            n_keep = int(num_tokens * (1.0 - kdvz_ratio))
+            norm_keys = F.normalize(attn_key, p=2, dim=-1)
+            
+            anchor = norm_keys.mean(dim=1, keepdim=True) 
+            scores = -F.cosine_similarity(norm_keys, anchor, dim=-1)
+            scores = scores.squeeze(0)
+            
+            keep_idx = scores.topk(n_keep, largest=True).indices
+            keep_idx, _ = keep_idx.sort()
+
+            select_mask = torch.zeros(num_tokens, dtype=torch.bool, device=attn_key.device)
+            select_mask[keep_idx] = True
+
+            img_mask = (input_ids == self.config.image_token_id)[0]
+            st_idx = torch.nonzero(img_mask, as_tuple=True)[0]
+            
+            if st_idx.numel() > 0:
+                first, last = st_idx[0].item(), st_idx[-1].item()
+                img_mask[first:last+1] = ~select_mask
+                img_mask = ~img_mask
+                
+                position_ids = position_ids[:, :, img_mask]
+                attention_mask = attention_mask[:, img_mask]
+                
+                inputs_embeds = inputs_embeds[:, img_mask]
+            
+            del norm_keys, anchor, scores, select_mask
+
+        torch.cuda.empty_cache()
         outputs = self.language_model(
             input_ids=None,
             position_ids=position_ids,
@@ -1313,6 +1578,16 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=True,
             cache_position=cache_position,
+            number_of_text_tokens=number_of_text_tokens,
+            enable_kd_prefill=enable_kd_prefill,
+            prefill_anchor=prefill_anchor,
+            prefill_ratio=prefill_ratio,
+            prefill_prune_after_layer=prefill_prune_after_layer,
+            enable_kd_decode=enable_kd_decode,
+            decode_anchor=decode_anchor,
+            decode_ratio=decode_ratio,
+            decode_prune_window=decode_prune_window,
+            decode_prune_after_layer=decode_prune_after_layer,
             **kwargs,
         )
 
@@ -1339,7 +1614,8 @@ class Qwen2_5_VLCausalLMOutputWithPast(ModelOutput):
     logits (`torch.FloatTensor` of shape `(batch_size, sequence_length, config.vocab_size)`):
         Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
     past_key_values (`Cache`, *optional*, returned when `use_cache=True` is passed or when `config.use_cache=True`):
-        It is a [`~cache_utils.Cache`] instance. For more details, see our [kv cache guide](https://huggingface.co/docs/transformers/en/kv_cache).
+        Tuple of `tuple(torch.FloatTensor)` of length `config.n_layers`, with each tuple having 2 tensors of shape
+        `(batch_size, num_heads, sequence_length, embed_size_per_head)`)
 
         Contains pre-computed hidden-states (key and values in the self-attention blocks) that can be used (see
         `past_key_values` input) to speed up sequential decoding.
@@ -1349,7 +1625,7 @@ class Qwen2_5_VLCausalLMOutputWithPast(ModelOutput):
 
     loss: Optional[torch.FloatTensor] = None
     logits: Optional[torch.FloatTensor] = None
-    past_key_values: Optional[Cache] = None
+    past_key_values: Optional[list[torch.FloatTensor]] = None
     hidden_states: Optional[tuple[torch.FloatTensor]] = None
     attentions: Optional[tuple[torch.FloatTensor]] = None
     rope_deltas: Optional[torch.LongTensor] = None
@@ -1404,7 +1680,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
     @auto_docstring
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
+        input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Cache] = None,
@@ -1421,6 +1697,20 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         cache_position: Optional[torch.LongTensor] = None,
         second_per_grid_ts: Optional[torch.Tensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
+
+        enable_visionzip: Optional[bool] = None,
+        visionzip_ratio: Optional[float] = None,
+        enable_kdvz: Optional[bool] = None,
+        kdvz_ratio: Optional[float] = None,
+        enable_kd_prefill: Optional[bool] = None,
+        prefill_anchor: Optional[str] = None,
+        prefill_ratio: Optional[float] = None,
+        prefill_prune_after_layer: Optional[int] = None,
+        enable_kd_decode: Optional[bool] = None,
+        decode_anchor: Optional[str] = None,
+        decode_ratio: Optional[float] = None,
+        decode_prune_window: Optional[int] = None,
+        decode_prune_after_layer: Optional[int] = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, Qwen2_5_VLCausalLMOutputWithPast]:
         r"""
@@ -1489,6 +1779,19 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             output_hidden_states=output_hidden_states,
             return_dict=True,
             cache_position=cache_position,
+            enable_visionzip=enable_visionzip,
+            visionzip_ratio=visionzip_ratio,
+            enable_kdvz=enable_kdvz,
+            kdvz_ratio=kdvz_ratio,
+            enable_kd_prefill=enable_kd_prefill,
+            prefill_anchor=prefill_anchor,
+            prefill_ratio=prefill_ratio,
+            prefill_prune_after_layer=prefill_prune_after_layer,
+            enable_kd_decode=enable_kd_decode,
+            decode_anchor=decode_anchor,
+            decode_ratio=decode_ratio,
+            decode_prune_window=decode_prune_window,
+            decode_prune_after_layer=decode_prune_after_layer,
             **kwargs,
         )
 
@@ -1527,6 +1830,19 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         image_grid_thw=None,
         video_grid_thw=None,
         second_per_grid_ts=None,
+        enable_visionzip: Optional[bool] = None,
+        visionzip_ratio: Optional[float] = None,
+        enable_kdvz: Optional[bool] = None,
+        kdvz_ratio: Optional[float] = None,
+        enable_kd_prefill: Optional[bool] = None,
+        prefill_anchor: Optional[str] = None,
+        prefill_ratio: Optional[float] = None,
+        prefill_prune_after_layer: Optional[int] = None,
+        enable_kd_decode: Optional[bool] = None,
+        decode_anchor: Optional[str] = None,
+        decode_ratio: Optional[float] = None,
+        decode_prune_window: Optional[int] = None,
+        decode_prune_after_layer: Optional[int] = None,
         **kwargs,
     ):
         # Overwritten -- in specific circumstances we don't want to forward image inputs to the model
@@ -1544,6 +1860,19 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             video_grid_thw=video_grid_thw,
             second_per_grid_ts=second_per_grid_ts,
             use_cache=use_cache,
+            enable_visionzip=enable_visionzip,
+            visionzip_ratio=visionzip_ratio,
+            enable_kdvz=enable_kdvz,
+            kdvz_ratio=kdvz_ratio,
+            enable_kd_prefill=enable_kd_prefill,
+            prefill_anchor=prefill_anchor,
+            prefill_ratio=prefill_ratio,
+            prefill_prune_after_layer=prefill_prune_after_layer,
+            enable_kd_decode=enable_kd_decode,
+            decode_anchor=decode_anchor,
+            decode_ratio=decode_ratio,
+            decode_prune_window=decode_prune_window,
+            decode_prune_after_layer=decode_prune_after_layer,
             **kwargs,
         )
 
@@ -1552,7 +1881,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             # Calculate RoPE index once per generation in the pre-fill stage only.
             # When compiling, we can't check tensor values thus we check only input length
             # It is safe to assume that `length!=1` means we're in pre-fill because compiled
-            # models currently cannot do assisted decoding
+            # models currently cannot do asssisted decoding
             if cache_position[0] == 0 or self.model.rope_deltas is None:
                 vision_positions, rope_deltas = self.model.get_rope_index(
                     model_inputs.get("input_ids", None),
@@ -1564,16 +1893,17 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
                 self.model.rope_deltas = rope_deltas
             # then use the prev pre-calculated rope-deltas to get the correct position ids
             elif "position_ids" in model_inputs:
-                batch_size, seq_length = model_inputs["position_ids"].shape
-                device = model_inputs["position_ids"].device
-                position_ids = torch.arange(seq_length, device=device)
-                position_ids = position_ids.view(1, 1, -1).expand(3, batch_size, -1)
-                delta = cache_position[0] + self.model.rope_deltas
-                delta = delta.repeat_interleave(batch_size // delta.shape[0], dim=0)
+                position_ids = model_inputs["position_ids"][None, ...]
+                delta = self.model.rope_deltas
+                delta = delta.repeat_interleave(position_ids.shape[1] // delta.shape[0], dim=0)
                 vision_positions = position_ids + delta.expand_as(position_ids)
+                vision_positions = vision_positions.expand(3, vision_positions.shape[1], -1)
 
             # Concatenate "text + vision" positions into [4, bs, seq-len]
-            text_positions = model_inputs["position_ids"][None, ...]
+            if "position_ids" not in model_inputs:
+                text_positions = torch.arange(input_ids, device=input_ids.device)[None, None, :]
+            else:
+                text_positions = model_inputs["position_ids"][None, ...]
             model_inputs["position_ids"] = torch.cat([text_positions, vision_positions], dim=0)
 
         if cache_position[0] != 0:
