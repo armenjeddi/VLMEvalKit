@@ -857,15 +857,23 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         number_of_text_tokens: Optional[int] = None,
-        enable_kd_prefill: Optional[bool] = None,
-        prefill_anchor: Optional[str] = None,
-        prefill_ratio: Optional[float] = None,
-        prefill_prune_after_layer: Optional[int] = None,
-        enable_kd_decode: Optional[bool] = None,
+
+        enable_kd_kvcache: Optional[bool] = False,
+        kvcache_anchor: Optional[str] = None,
+        kvcache_ratio: Optional[float] = None,
+        kvcache_prune_after_layer: Optional[int] = None,
+
+        enable_kd_tokens: Optional[bool] = False,
+        tokens_anchor: Optional[str] = None,
+        tokens_ratio: Optional[float] = None,
+        tokens_prune_layers: Optional[str] = None,
+
+        enable_kd_decode: Optional[bool] = False,
         decode_anchor: Optional[str] = None,
         decode_ratio: Optional[float] = None,
         decode_prune_window: Optional[int] = None,
         decode_prune_after_layer: Optional[int] = None,
+
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Union[tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -971,7 +979,7 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
 
             hidden_states = layer_outputs[0]
 
-            if enable_kd_prefill and i >= prefill_prune_after_layer and prefilling and past_key_values is not None:
+            if enable_kd_kvcache and i >= kvcache_prune_after_layer and prefilling and past_key_values is not None:
                 self.decoded_tokens = 0
                 # q_len = hidden_states.shape[1]
 
@@ -992,17 +1000,17 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
 
                 vision_keys = keys[:, :, :number_of_vision_tokens, :]
                 text_keys = keys[:, :, number_of_vision_tokens:, :]
-                if prefill_anchor == "vision":
+                if kvcache_anchor == "vision":
                     anchor = F.normalize(vision_keys, p=2, dim=-1).mean(2, keepdim=True)
-                elif prefill_anchor == "text":
+                elif kvcache_anchor == "text":
                     anchor = F.normalize(text_keys, p=2, dim=-1).mean(2, keepdim=True)
-                elif prefill_anchor == "all":
+                elif kvcache_anchor == "all":
                     anchor = F.normalize(keys, p=2, dim=-1).mean(2, keepdim=True)    
 
                 norm_vis = F.normalize(vision_keys, p=2, dim=-1)
                 scores = -F.cosine_similarity(norm_vis, anchor, dim=-1)
 
-                n_keep_vis = int(number_of_vision_tokens * (1.0 - prefill_ratio))
+                n_keep_vis = int(number_of_vision_tokens * (1.0 - kvcache_ratio))
 
                 global_scores = scores.mean(dim=(0, 1))
                 vis_keep_idx = global_scores.topk(n_keep_vis, largest=True).indices
@@ -1022,6 +1030,77 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
                 cache_layer.values = values_new
 
 
+            elif enable_kd_tokens and i in [int(x) for x in tokens_prune_layers.split(",")] and prefilling:
+                bsz, seq_len, _ = hidden_states.shape
+                number_of_vision_tokens = seq_len - number_of_text_tokens
+                
+                module = getattr(decoder_layer, "self_attn", None)
+                cache_layer = past_key_values.layers[module.layer_idx]
+                keys = cache_layer.keys # [bsz, num_kv_heads, seq_len, head_dim]
+                
+                vision_keys = keys[:, :, :number_of_vision_tokens, :]
+                text_keys = keys[:, :, number_of_vision_tokens:, :]
+                
+                if tokens_anchor == "vision":
+                    anchor = F.normalize(vision_keys, p=2, dim=-1).mean(2, keepdim=True)
+                elif tokens_anchor == "text":
+                    anchor = F.normalize(text_keys, p=2, dim=-1).mean(2, keepdim=True)
+                elif tokens_anchor == "all":
+                    anchor = F.normalize(keys, p=2, dim=-1).mean(2, keepdim=True)
+                else:
+                    anchor = F.normalize(vision_keys, p=2, dim=-1).mean(2, keepdim=True)
+
+                norm_vis = F.normalize(vision_keys, p=2, dim=-1)
+                scores = -F.cosine_similarity(norm_vis, anchor, dim=-1)
+                global_scores = scores.mean(dim=(0, 1))
+                
+                n_keep_vis = int(number_of_vision_tokens * (1.0 - tokens_ratio))
+                vis_keep_idx = global_scores.topk(n_keep_vis, largest=True).indices
+                txt_idx = torch.arange(number_of_vision_tokens, seq_len, device=hidden_states.device)
+                
+                keep_idx, _ = torch.sort(torch.cat([vis_keep_idx, txt_idx], dim=0))
+                
+                hidden_states = hidden_states[:, keep_idx, :] # prune hidden states
+                
+                for j in range(i + 1):
+                    prev_cache_layer = past_key_values.layers[j]
+                    # Gather keys and values across the sequence dimension (dim=2)
+                    L_kept = keep_idx.numel()
+                    curr_num_kv_heads = prev_cache_layer.keys.shape[1]
+                    curr_head_dim = prev_cache_layer.keys.shape[3]
+                    
+                    gather_idx = keep_idx.view(1, 1, L_kept, 1).expand(
+                        bsz, curr_num_kv_heads, L_kept, curr_head_dim
+                    ).contiguous()
+                    
+                    prev_cache_layer.keys = prev_cache_layer.keys.gather(2, gather_idx).contiguous()
+                    prev_cache_layer.values = prev_cache_layer.values.gather(2, gather_idx).contiguous()
+
+                cache_position = cache_position[keep_idx]
+                text_position_ids = text_position_ids[:, keep_idx]
+                position_ids = position_ids[:, :, keep_idx]
+                
+                # Update number of text tokens (remains same) but total sequence length has changed
+                # We update the loop-level seq_len reference if needed, but it's re-calc next loop
+                
+                mask_kwargs = {
+                    "config": self.config,
+                    "input_embeds": hidden_states,
+                    "attention_mask": None, # Assuming default causal
+                    "cache_position": cache_position,
+                    "past_key_values": past_key_values,
+                    "position_ids": text_position_ids,
+                }
+                causal_mask_mapping = {
+                    "full_attention": create_causal_mask(**mask_kwargs),
+                }
+                if self.has_sliding_layers:
+                    causal_mask_mapping["sliding_attention"] = create_sliding_window_causal_mask(**mask_kwargs)
+                
+                position_embeddings = self.rotary_emb(hidden_states, position_ids)
+                
+
+                
             if enable_kd_decode and self.decoded_tokens > 0 and self.decoded_tokens % decode_prune_window == 0 and i >= decode_prune_after_layer and past_key_values is not None:
                 module = getattr(decoder_layer, "self_attn", None)
 
@@ -1399,10 +1478,17 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         visionzip_ratio: Optional[float] = None,
         enable_kdvz: Optional[bool] = None,
         kdvz_ratio: Optional[float] = None,
-        enable_kd_prefill: Optional[bool] = None,
-        prefill_anchor: Optional[str] = None,
-        prefill_ratio: Optional[float] = None,
-        prefill_prune_after_layer: Optional[int] = None,
+
+        enable_kd_kvcache: Optional[bool] = None,
+        kvcache_anchor: Optional[str] = None,
+        kvcache_ratio: Optional[float] = None,
+        kvcache_prune_after_layer: Optional[int] = None,
+
+        enable_kd_tokens: Optional[bool] = None,
+        tokens_anchor: Optional[str] = None,
+        tokens_ratio: Optional[float] = None,
+        tokens_prune_layers: Optional[str] = None,
+        
         enable_kd_decode: Optional[bool] = None,
         decode_anchor: Optional[str] = None,
         decode_ratio: Optional[float] = None,
@@ -1579,10 +1665,16 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             return_dict=True,
             cache_position=cache_position,
             number_of_text_tokens=number_of_text_tokens,
-            enable_kd_prefill=enable_kd_prefill,
-            prefill_anchor=prefill_anchor,
-            prefill_ratio=prefill_ratio,
-            prefill_prune_after_layer=prefill_prune_after_layer,
+            enable_kd_kvcache=enable_kd_kvcache,
+            kvcache_anchor=kvcache_anchor,
+            kvcache_ratio=kvcache_ratio,
+            kvcache_prune_after_layer=kvcache_prune_after_layer,
+
+            enable_kd_tokens=enable_kd_tokens,
+            tokens_anchor=tokens_anchor,
+            tokens_ratio=tokens_ratio,
+            tokens_prune_layers=tokens_prune_layers,
+            
             enable_kd_decode=enable_kd_decode,
             decode_anchor=decode_anchor,
             decode_ratio=decode_ratio,
@@ -1702,10 +1794,17 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         visionzip_ratio: Optional[float] = None,
         enable_kdvz: Optional[bool] = None,
         kdvz_ratio: Optional[float] = None,
-        enable_kd_prefill: Optional[bool] = None,
-        prefill_anchor: Optional[str] = None,
-        prefill_ratio: Optional[float] = None,
-        prefill_prune_after_layer: Optional[int] = None,
+
+        enable_kd_kvcache: Optional[bool] = None,
+        kvcache_anchor: Optional[str] = None,
+        kvcache_ratio: Optional[float] = None,
+        kvcache_prune_after_layer: Optional[int] = None,
+
+        enable_kd_tokens: Optional[bool] = None,
+        tokens_anchor: Optional[str] = None,
+        tokens_ratio: Optional[float] = None,
+        tokens_prune_layers: Optional[str] = None,
+        
         enable_kd_decode: Optional[bool] = None,
         decode_anchor: Optional[str] = None,
         decode_ratio: Optional[float] = None,
@@ -1783,10 +1882,14 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             visionzip_ratio=visionzip_ratio,
             enable_kdvz=enable_kdvz,
             kdvz_ratio=kdvz_ratio,
-            enable_kd_prefill=enable_kd_prefill,
-            prefill_anchor=prefill_anchor,
-            prefill_ratio=prefill_ratio,
-            prefill_prune_after_layer=prefill_prune_after_layer,
+            enable_kd_kvcache=enable_kd_kvcache,
+            kvcache_anchor=kvcache_anchor,
+            kvcache_ratio=kvcache_ratio,
+            kvcache_prune_after_layer=kvcache_prune_after_layer,
+            enable_kd_tokens=enable_kd_tokens,
+            tokens_anchor=tokens_anchor,
+            tokens_ratio=tokens_ratio,
+            tokens_prune_layers=tokens_prune_layers,
             enable_kd_decode=enable_kd_decode,
             decode_anchor=decode_anchor,
             decode_ratio=decode_ratio,
@@ -1834,10 +1937,14 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         visionzip_ratio: Optional[float] = None,
         enable_kdvz: Optional[bool] = None,
         kdvz_ratio: Optional[float] = None,
-        enable_kd_prefill: Optional[bool] = None,
-        prefill_anchor: Optional[str] = None,
-        prefill_ratio: Optional[float] = None,
-        prefill_prune_after_layer: Optional[int] = None,
+        enable_kd_kvcache: Optional[bool] = None,
+        kvcache_anchor: Optional[str] = None,
+        kvcache_ratio: Optional[float] = None,
+        kvcache_prune_after_layer: Optional[int] = None,
+        enable_kd_tokens: Optional[bool] = None,
+        tokens_anchor: Optional[str] = None,
+        tokens_ratio: Optional[float] = None,
+        tokens_prune_layers: Optional[str] = None,
         enable_kd_decode: Optional[bool] = None,
         decode_anchor: Optional[str] = None,
         decode_ratio: Optional[float] = None,
@@ -1864,10 +1971,14 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             visionzip_ratio=visionzip_ratio,
             enable_kdvz=enable_kdvz,
             kdvz_ratio=kdvz_ratio,
-            enable_kd_prefill=enable_kd_prefill,
-            prefill_anchor=prefill_anchor,
-            prefill_ratio=prefill_ratio,
-            prefill_prune_after_layer=prefill_prune_after_layer,
+            enable_kd_kvcache=enable_kd_kvcache,
+            kvcache_anchor=kvcache_anchor,
+            kvcache_ratio=kvcache_ratio,
+            kvcache_prune_after_layer=kvcache_prune_after_layer,
+            enable_kd_tokens=enable_kd_tokens,
+            tokens_anchor=tokens_anchor,
+            tokens_ratio=tokens_ratio,
+            tokens_prune_layers=tokens_prune_layers,
             enable_kd_decode=enable_kd_decode,
             decode_anchor=decode_anchor,
             decode_ratio=decode_ratio,

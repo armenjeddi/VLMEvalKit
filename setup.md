@@ -20,10 +20,15 @@ In this file, there are parameters to change:
 `kdvz_ratio=0.5`
 
 #### Prefill KeyDiff Pruning
-`enable_kd_prefill=False`\
-`prefill_anchor="all"`\
-`prefill_ratio=0.5`\
-`prefill_prune_after_layer=8`
+`enable_kd_kvcache=False`\
+`kvcache_anchor="all"`\
+`kvcache_ratio=0.5`\
+`kvcache_prune_after_layer=8`
+
+`enable_kd_tokens=False`\
+`tokens_anchor="all"\
+`tokens_ratio=0.5`\
+`tokens_prune_after_layer=8`\
 
 #### Decode KeyDiff Pruning
 `enable_kd_decode=False`\
