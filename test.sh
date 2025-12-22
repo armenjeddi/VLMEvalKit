@@ -6,10 +6,15 @@ export visionzip_ratio=0.55
 export enable_kdvz=False
 export kdvz_ratio=0.5
 
-export enable_kd_prefill=False
-export prefill_anchor="all"
-export prefill_ratio=0.5
-export prefill_prune_after_layer=8
+export enable_kd_kvcache=False
+export kvcache_anchor="all"
+export kvcache_ratio=0.5
+export kvcache_prune_after_layer=8
+
+export enable_kd_tokens=False
+export tokens_anchor="all"
+export tokens_ratio=0.5
+export tokens_prune_layers="4,8"
 
 export enable_kd_decode=False
 export decode_anchor="all"
