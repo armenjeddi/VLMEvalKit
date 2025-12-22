@@ -1080,13 +1080,11 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
                 text_position_ids = text_position_ids[:, keep_idx]
                 position_ids = position_ids[:, :, keep_idx]
                 
-                # Update number of text tokens (remains same) but total sequence length has changed
-                # We update the loop-level seq_len reference if needed, but it's re-calc next loop
                 
                 mask_kwargs = {
                     "config": self.config,
                     "input_embeds": hidden_states,
-                    "attention_mask": None, # Assuming default causal
+                    "attention_mask": None, # assuming default causal
                     "cache_position": cache_position,
                     "past_key_values": past_key_values,
                     "position_ids": text_position_ids,

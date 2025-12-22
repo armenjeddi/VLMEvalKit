@@ -43,7 +43,7 @@ run_one() {
     if [ ${#config_tags[@]} -eq 0 ]; then config_tags=("base"); fi
     
     config_suffix=$(IFS=_; echo "${config_tags[*]}")
-    work_dir="./results/${model_name}/${data}-${config_suffix}-${date_tag}"
+    work_dir="./results/${date_tag}/${model_name}/${data}-${config_suffix}"
 
     echo "------------------------------------------------"
     echo "Running Data: $data | Model: $model_name"
@@ -65,16 +65,46 @@ run_one() {
 
 experiments=(
 
-    # "device=0 data=MME model_name=Qwen \
-    # enable_kdvz=True kdvz_ratio=0.5"
-  
-    "device=0 data=MME model_name=Qwen \
-    enable_kdvz=True visionzip_ratio=0.5 \
-    enable_kd_tokens=True tokens_anchor=all tokens_ratio=0.5 tokens_prune_layers=4"
+    "device=0 data=POPE model_name=Qwen" \
 
-    
-  
-    # "device=0 data=MME model_name=Qwen
+    "device=0 data=POPE model_name=Qwen \
+    enable_kdvz=True kdvz_ratio=0.5" \
+
+    "device=0 data=POPE model_name=Qwen \
+    enable_kd_tokens=True tokens_anchor=all tokens_ratio=0.5 tokens_prune_layers=4,8,10" \
+
+    "device=0 data=POPE model_name=Qwen \
+    enable_kd_tokens=True tokens_anchor=all tokens_ratio=0.5 tokens_prune_layers=8" \
+
+    "device=0 data=POPE model_name=Qwen \
+    enable_kdvz=True kdvz_ratio=0.5 \
+    enable_kd_tokens=True tokens_anchor=all tokens_ratio=0.5 tokens_prune_layers=4" \
+
+    "device=0 data=POPE model_name=Qwen \
+    enable_kdvz=True kdvz_ratio=0.5 \
+    enable_kd_tokens=True tokens_anchor=all tokens_ratio=0.5 tokens_prune_layers=8" \
+
+
+
+
+    "device=0 data=MME model_name=Qwen" \
+
+    "device=0 data=MME model_name=Qwen \
+    enable_kdvz=True kdvz_ratio=0.5" \
+
+    "device=0 data=MME model_name=Qwen \
+    enable_kd_tokens=True tokens_anchor=all tokens_ratio=0.5 tokens_prune_layers=4" \
+
+    "device=0 data=MME model_name=Qwen \
+    enable_kd_tokens=True tokens_anchor=all tokens_ratio=0.5 tokens_prune_layers=8" \
+
+    "device=0 data=MME model_name=Qwen \
+    enable_kdvz=True kdvz_ratio=0.5 \
+    enable_kd_tokens=True tokens_anchor=all tokens_ratio=0.5 tokens_prune_layers=4" \
+
+    "device=0 data=MME model_name=Qwen \
+    enable_kdvz=True kdvz_ratio=0.5 \
+    enable_kd_tokens=True tokens_anchor=all tokens_ratio=0.5 tokens_prune_layers=8" \
 
   
 )

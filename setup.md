@@ -26,9 +26,9 @@ In this file, there are parameters to change:
 `kvcache_prune_after_layer=8`
 
 `enable_kd_tokens=False`\
-`tokens_anchor="all"\
+`tokens_anchor="all"`\
 `tokens_ratio=0.5`\
-`tokens_prune_after_layer=8`\
+`tokens_prune_layers=8` (can be multiple layers, for example `4,8,10`)
 
 #### Decode KeyDiff Pruning
 `enable_kd_decode=False`\
