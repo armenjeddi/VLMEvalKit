@@ -101,16 +101,9 @@ def flash_attention_forward(
         return attn_output, attn_logits, return_k
     
     if enable_kdvz:
-        with torch.no_grad():
-            import torch.nn.functional as F
-            q = query.permute(0, 2, 1, 3)  # [B, T, H, D] -> [B, H, T, D]
-            k = key.permute(0, 2, 1, 3)  # [B, T, H, D] -> [B, H, T, D]
-
-            attn_output = attn_output.squeeze(0)
-            return_k = k.squeeze(0)
-
-        torch.cuda.empty_cache()
-
+        k = key.permute(0, 2, 1, 3)  # [B, T, H, D] -> [B, H, T, D]
+        attn_output = attn_output.squeeze(0)
+        return_k = k.squeeze(0)
         return attn_output, None, return_k
 
     return attn_output, None, None

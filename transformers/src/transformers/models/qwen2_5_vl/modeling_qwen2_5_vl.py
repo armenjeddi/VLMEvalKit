@@ -511,7 +511,8 @@ class Qwen2_5_VisionTransformerPretrainedModel(Qwen2_5_VLPreTrainedModel):
         elif enable_kdvz:
             with torch.no_grad():
                 attn_key = attn_key.view(attn_key.shape[0], attn_key.shape[1]//4, 4, attn_key.shape[-1]).mean(dim=2)
-                attn_key = attn_key[:, reverse_indices, :].mean(dim=0).unsqueeze(0)
+                # attn_key = attn_key[:, reverse_indices, :].mean(dim=0).unsqueeze(0) ## this averages heads out --> vision zip style
+                attn_key = attn_key[:, reverse_indices, :] ## this keeps per-head keys, for our KD adapation
             return hidden_states, None, attn_key
 
         return hidden_states, None, None
@@ -1033,53 +1034,36 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
             elif enable_kd_tokens and i in [int(x) for x in tokens_prune_layers.split(",")] and prefilling:
                 bsz, seq_len, _ = hidden_states.shape
                 number_of_vision_tokens = seq_len - number_of_text_tokens
+                n_keep_vis = int(number_of_vision_tokens * (1.0 - tokens_ratio))
                 
                 module = getattr(decoder_layer, "self_attn", None)
                 cache_layer = past_key_values.layers[module.layer_idx]
-                keys = cache_layer.keys # [bsz, num_kv_heads, seq_len, head_dim]
+
+                norm_keys = F.normalize(cache_layer.keys, p=2, dim=-1)
                 
-                vision_keys = keys[:, :, :number_of_vision_tokens, :]
-                text_keys = keys[:, :, number_of_vision_tokens:, :]
+                vision_keys = norm_keys[:, :, :number_of_vision_tokens, :]
+                text_keys = norm_keys[:, :, number_of_vision_tokens:, :]
                 
                 if tokens_anchor == "vision":
-                    anchor = F.normalize(vision_keys, p=2, dim=-1).mean(2, keepdim=True)
+                    anchor = vision_keys.mean(2, keepdim=True)
                 elif tokens_anchor == "text":
-                    anchor = F.normalize(text_keys, p=2, dim=-1).mean(2, keepdim=True)
-                elif tokens_anchor == "all":
-                    anchor = F.normalize(keys, p=2, dim=-1).mean(2, keepdim=True)
-                else:
-                    anchor = F.normalize(vision_keys, p=2, dim=-1).mean(2, keepdim=True)
+                    anchor = text_keys.mean(2, keepdim=True)
+                else: #tokens_anchor == "all":
+                    anchor = norm_keys.mean(2, keepdim=True)
 
-                norm_vis = F.normalize(vision_keys, p=2, dim=-1)
-                scores = -F.cosine_similarity(norm_vis, anchor, dim=-1)
-                global_scores = scores.mean(dim=(0, 1))
+                scores = -F.cosine_similarity(vision_keys, anchor, dim=-1)
+                scores = scores.mean(dim=(0, 1))
                 
-                n_keep_vis = int(number_of_vision_tokens * (1.0 - tokens_ratio))
-                vis_keep_idx = global_scores.topk(n_keep_vis, largest=True).indices
+                vis_keep_idx = scores.topk(n_keep_vis, largest=True).indices
                 txt_idx = torch.arange(number_of_vision_tokens, seq_len, device=hidden_states.device)
                 
                 keep_idx, _ = torch.sort(torch.cat([vis_keep_idx, txt_idx], dim=0))
                 
                 hidden_states = hidden_states[:, keep_idx, :] # prune hidden states
-                
-                for j in range(i + 1):
-                    prev_cache_layer = past_key_values.layers[j]
-                    # Gather keys and values across the sequence dimension (dim=2)
-                    L_kept = keep_idx.numel()
-                    curr_num_kv_heads = prev_cache_layer.keys.shape[1]
-                    curr_head_dim = prev_cache_layer.keys.shape[3]
-                    
-                    gather_idx = keep_idx.view(1, 1, L_kept, 1).expand(
-                        bsz, curr_num_kv_heads, L_kept, curr_head_dim
-                    ).contiguous()
-                    
-                    prev_cache_layer.keys = prev_cache_layer.keys.gather(2, gather_idx).contiguous()
-                    prev_cache_layer.values = prev_cache_layer.values.gather(2, gather_idx).contiguous()
 
                 cache_position = cache_position[keep_idx]
                 text_position_ids = text_position_ids[:, keep_idx]
                 position_ids = position_ids[:, :, keep_idx]
-                
                 
                 mask_kwargs = {
                     "config": self.config,
@@ -1097,8 +1081,7 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
                 
                 position_embeddings = self.rotary_emb(hidden_states, position_ids)
                 
-
-                
+            ###### TODO: clean the following code when we are releasing the repo
             if enable_kd_decode and self.decoded_tokens > 0 and self.decoded_tokens % decode_prune_window == 0 and i >= decode_prune_after_layer and past_key_values is not None:
                 module = getattr(decoder_layer, "self_attn", None)
 
@@ -1139,7 +1122,6 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
 
                 cache_layer.keys = keys_new 
                 cache_layer.values = values_new
-
 
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
@@ -1388,10 +1370,10 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                 The temporal, height and width of feature shape of each video in LLM.
         """
         pixel_values_videos = pixel_values_videos.type(self.visual.dtype)
-        video_embeds = self.visual(pixel_values_videos, grid_thw=video_grid_thw)
+        video_embeds, attn_logits, attn_key = self.visual(pixel_values_videos, grid_thw=video_grid_thw)
         split_sizes = (video_grid_thw.prod(-1) // self.visual.spatial_merge_size**2).tolist()
         video_embeds = torch.split(video_embeds, split_sizes)
-        return video_embeds
+        return video_embeds, attn_logits, attn_key
 
     def get_image_features(self, pixel_values: torch.FloatTensor, image_grid_thw: Optional[torch.LongTensor] = None, enable_visionzip=False, enable_kdvz=False):
         """
@@ -1472,6 +1454,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         rope_deltas: Optional[torch.LongTensor] = None,
         cache_position: Optional[torch.LongTensor] = None,
         second_per_grid_ts: Optional[torch.Tensor] = None,
+
         enable_visionzip: Optional[bool] = None,
         visionzip_ratio: Optional[float] = None,
         enable_kdvz: Optional[bool] = None,
@@ -1492,6 +1475,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         decode_ratio: Optional[float] = None,
         decode_prune_window: Optional[int] = None,
         decode_prune_after_layer: Optional[int] = None,
+
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, Qwen2_5_VLModelOutputWithPast]:
         r"""
@@ -1514,7 +1498,6 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.get_input_embeddings()(input_ids)
 
-        # print(input_ids)
         number_of_text_tokens = None
         select_pixel = False
         if pixel_values is not None:
@@ -1527,16 +1510,21 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             )
             inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
 
-
+            ### the following two params are used for pruning
             number_of_text_tokens = inputs_embeds.shape[1] - image_embeds.shape[0]
+            placeholder_vision_token = self.config.image_token_id
 
         if pixel_values_videos is not None:
-            video_embeds = self.get_video_features(pixel_values_videos, video_grid_thw)
+            video_embeds, attn_logits, attn_key = self.get_video_features(pixel_values_videos, video_grid_thw)
             video_embeds = torch.cat(video_embeds, dim=0).to(inputs_embeds.device, inputs_embeds.dtype)
             _, video_mask = self.get_placeholder_mask(
                 input_ids, inputs_embeds=inputs_embeds, video_features=video_embeds
             )
             inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
+
+            ### the following two params are used for pruning
+            number_of_text_tokens = inputs_embeds.shape[1] - video_embeds.shape[0]
+            placeholder_vision_token = self.config.video_token_id
 
         if position_ids is None:
             # Calculate RoPE index once per generation in the pre-fill stage only.
@@ -1619,15 +1607,15 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         
         if select_pixel and enable_kdvz:
             # inputs_embeds shape: 1, num_tokens, embed_dim
-            # attn_key shape: 1, num_tokens, key_dim
+            # attn_key shape: num_heads, num_tokens, key_dim
             
             num_tokens = attn_key.size(1)
             n_keep = int(num_tokens * (1.0 - kdvz_ratio))
             norm_keys = F.normalize(attn_key, p=2, dim=-1)
             
-            anchor = norm_keys.mean(dim=1, keepdim=True) 
+            anchor = norm_keys.mean(dim=1, keepdim=True)
             scores = -F.cosine_similarity(norm_keys, anchor, dim=-1)
-            scores = scores.squeeze(0)
+            scores = scores.mean(dim=0)
             
             keep_idx = scores.topk(n_keep, largest=True).indices
             keep_idx, _ = keep_idx.sort()
@@ -1635,9 +1623,9 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             select_mask = torch.zeros(num_tokens, dtype=torch.bool, device=attn_key.device)
             select_mask[keep_idx] = True
 
-            img_mask = (input_ids == self.config.image_token_id)[0]
-            st_idx = torch.nonzero(img_mask, as_tuple=True)[0]
+            img_mask = (input_ids == placeholder_vision_token)[0]
             
+            st_idx = torch.nonzero(img_mask, as_tuple=True)[0]
             if st_idx.numel() > 0:
                 first, last = st_idx[0].item(), st_idx[-1].item()
                 img_mask[first:last+1] = ~select_mask
@@ -1649,6 +1637,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                 inputs_embeds = inputs_embeds[:, img_mask]
             
             del norm_keys, anchor, scores, select_mask
+        
 
         torch.cuda.empty_cache()
         outputs = self.language_model(
