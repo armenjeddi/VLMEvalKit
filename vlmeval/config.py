@@ -1508,6 +1508,38 @@ qwen2vl_series = {
         decode_prune_after_layer=int(os.environ.get("decode_prune_after_layer", 8))
     ),
 
+    "Qwen-Video": partial(
+        Qwen2VLChat,
+        model_path=os.environ.get("model_path", "Qwen/Qwen2.5-VL-7B-Instruct"),
+        min_pixels=120 * 28 * 28,
+        max_pixels=720 * 28 * 28,
+        use_custom_prompt=False,
+
+        enable_visionzip=get_bool_env("enable_visionzip", False),
+        visionzip_ratio=float(os.environ.get("visionzip_ratio", 0.0)),
+
+        enable_kdvz=get_bool_env("enable_kdvz", False),
+        kdvz_ratio=float(os.environ.get("kdvz_ratio", 0.0)),
+
+        enable_kd_kvcache=get_bool_env("enable_kd_kvcache", False),
+        kvcache_anchor=os.environ.get("kvcache_anchor", "all"),
+        kvcache_ratio=float(os.environ.get("kvcache_ratio", 0.0)),
+        kvcache_prune_after_layer=int(os.environ.get("kvcache_prune_after_layer", 8)),
+
+        enable_kd_tokens=get_bool_env("enable_kd_tokens", False),
+        tokens_anchor=os.environ.get("tokens_anchor", "all"),
+        tokens_ratio=float(os.environ.get("tokens_ratio", 0.0)),
+        tokens_prune_layers=os.environ.get("tokens_prune_layers", "7,15,23"),
+
+        enable_kd_decode=get_bool_env("enable_kd_decode", False),
+        decode_anchor=os.environ.get("decode_anchor", "all"),
+        decode_ratio=float(os.environ.get("decode_ratio", 0.0)),
+        decode_prune_window=int(os.environ.get("decode_prune_window", 50)),
+        decode_prune_after_layer=int(os.environ.get("decode_prune_after_layer", 8))
+    ),
+
+
+
     "Qwen-VL-Max-20250813": partial(
         Qwen2VLAPI,
         model="qwen-vl-max-2025-08-13",

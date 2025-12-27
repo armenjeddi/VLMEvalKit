@@ -1358,7 +1358,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             return position_ids, mrope_position_deltas
 
     def get_video_features(
-        self, pixel_values_videos: torch.FloatTensor, video_grid_thw: Optional[torch.LongTensor] = None
+        self, pixel_values_videos: torch.FloatTensor, video_grid_thw: Optional[torch.LongTensor] = None, enable_visionzip=False, enable_kdvz=False
     ):
         """
         Encodes videos into continuous embeddings that can be forwarded to the language model.
@@ -1370,7 +1370,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                 The temporal, height and width of feature shape of each video in LLM.
         """
         pixel_values_videos = pixel_values_videos.type(self.visual.dtype)
-        video_embeds, attn_logits, attn_key = self.visual(pixel_values_videos, grid_thw=video_grid_thw)
+        video_embeds, attn_logits, attn_key = self.visual(pixel_values_videos, grid_thw=video_grid_thw, enable_visionzip=enable_visionzip, enable_kdvz=enable_kdvz)
         split_sizes = (video_grid_thw.prod(-1) // self.visual.spatial_merge_size**2).tolist()
         video_embeds = torch.split(video_embeds, split_sizes)
         return video_embeds, attn_logits, attn_key
@@ -1386,9 +1386,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                 The temporal, height and width of feature shape of each image in LLM.
         """
         pixel_values = pixel_values.type(self.visual.dtype)
-        image_embeds, attn_logits, attn_key = self.visual(pixel_values, enable_visionzip=enable_visionzip, enable_kdvz=enable_kdvz, grid_thw=image_grid_thw)
-        
-        # image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
+        image_embeds, attn_logits, attn_key = self.visual(pixel_values, grid_thw=image_grid_thw, enable_visionzip=enable_visionzip, enable_kdvz=enable_kdvz)
 
         split_sizes = (image_grid_thw.prod(-1) // self.visual.spatial_merge_size**2).tolist()
         image_embeds = torch.split(image_embeds, split_sizes)
@@ -1503,7 +1501,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         if pixel_values is not None:
             select_pixel = True
 
-            image_embeds, attn_logits, attn_key = self.get_image_features(pixel_values, enable_visionzip=enable_visionzip, enable_kdvz=enable_kdvz, image_grid_thw=image_grid_thw)
+            image_embeds, attn_logits, attn_key = self.get_image_features(pixel_values, image_grid_thw=image_grid_thw, enable_visionzip=enable_visionzip, enable_kdvz=enable_kdvz)
             image_embeds = torch.cat(image_embeds, dim=0).to(inputs_embeds.device, inputs_embeds.dtype)
             image_mask, _ = self.get_placeholder_mask(
                 input_ids, inputs_embeds=inputs_embeds, image_features=image_embeds
@@ -1515,7 +1513,8 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             placeholder_vision_token = self.config.image_token_id
 
         if pixel_values_videos is not None:
-            video_embeds, attn_logits, attn_key = self.get_video_features(pixel_values_videos, video_grid_thw)
+            select_pixel = True
+            video_embeds, attn_logits, attn_key = self.get_video_features(pixel_values_videos, video_grid_thw=video_grid_thw, enable_visionzip=enable_visionzip, enable_kdvz=enable_kdvz)
             video_embeds = torch.cat(video_embeds, dim=0).to(inputs_embeds.device, inputs_embeds.dtype)
             _, video_mask = self.get_placeholder_mask(
                 input_ids, inputs_embeds=inputs_embeds, video_features=video_embeds
