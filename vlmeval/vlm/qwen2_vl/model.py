@@ -331,6 +331,10 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
 
         self.enable_thinking_mode = kwargs.get('thinking_mode')
 
+        from pprint import pprint
+        print("Generate kwargs:")
+        pprint(self.generate_kwargs)
+
         torch.cuda.empty_cache()
 
     def _prepare_content(self, inputs: list[dict[str, str]], dataset: str | None = None) -> list[dict[str, str]]:

@@ -1485,6 +1485,8 @@ qwen2vl_series = {
         max_pixels=16384 * 28 * 28,
         use_custom_prompt=False,
 
+        temperature=float(os.environ.get("temperature", 0.000001)),
+
         enable_visionzip=get_bool_env("enable_visionzip", False),
         visionzip_ratio=float(os.environ.get("visionzip_ratio", 0.0)),
 

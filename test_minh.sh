@@ -31,23 +31,27 @@ run_one() {
     [[ "$enable_visionzip" == "True" ]] && config_tags+=("vz${visionzip_ratio//./}")
     [[ "$enable_kdvz" == "True" ]]      && config_tags+=("kdvz${kdvz_ratio//./}")
     
+    if [[ "$enable_kd_kvcache" == "True" ]]; then
+        config_tags+=("kdkv_${kvcache_anchor}${kvcache_ratio//./}_i${kvcache_prune_after_layer}")
+    fi
+
     if [[ "$enable_kd_tokens" == "True" ]]; then
-        config_tags+=("tk_${tokens_anchor}_r${tokens_ratio//./}_l${tokens_prune_layers}")
+        config_tags+=("kdt_${tokens_anchor}${tokens_ratio//./}_l${tokens_prune_layers}")
     fi
     
     if [[ "$enable_kd_decode" == "True" ]]; then
-        config_tags+=("dec_${decode_anchor}_r${decode_ratio//./}_w${decode_prune_window}")
+        config_tags+=("kdd_${decode_anchor}${decode_ratio//./}_w${decode_prune_window}")
     fi
 
     # Fallback for base run
     if [ ${#config_tags[@]} -eq 0 ]; then config_tags=("base"); fi
     
     config_suffix=$(IFS=_; echo "${config_tags[*]}")
-    work_dir="./results/${date_tag}/${model_name}/${data}-${config_suffix}"
+    work_dir="./results/${date_tag}/${data}_${config_suffix}"
 
     echo "------------------------------------------------"
     echo "Running Data: $data | Model: $model_name"
-    echo "Work Dir: $work_dir"
+    echo "Output Dir: $work_dir"
     echo "------------------------------------------------"
 
     export model_path enable_visionzip visionzip_ratio enable_kdvz kdvz_ratio \
