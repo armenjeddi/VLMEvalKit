@@ -186,9 +186,11 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         max_new_tokens=2048,
         top_p=0.001,
         top_k=1,
+        majority_vote=1,
         temperature=0.01,
         repetition_penalty=1.0,
         use_kv_cache: bool = True,
+        enable_cot=False,
         enable_visionzip=False,
         visionzip_ratio=0.0,
         enable_kdvz=False,
@@ -220,6 +222,16 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         self.max_new_tokens = max_new_tokens
         if self.total_pixels and self.total_pixels > 24576 * 28 * 28:
             print('The total number of video tokens might become too large, resulting in an overly long input sequence. We recommend lowering **total_pixels** to below **24576 × 28 × 28**.')  # noqa: E501
+
+        if temperature > 0.000001:
+            top_p = 0.9
+            top_k = None
+        else:
+            top_p = 0.001
+            top_k = 1
+
+        self.majority_vote = majority_vote
+        self.enable_cot = enable_cot
         self.generate_kwargs = dict(
             max_new_tokens=self.max_new_tokens,
             top_p=top_p,
@@ -329,7 +341,7 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             )
             self.model.eval()
 
-        self.enable_thinking_mode = kwargs.get('thinking_mode')
+        self.enable_thinking = kwargs.get('enable_thinking')
 
         from pprint import pprint
         print("Generate kwargs:")
@@ -671,10 +683,24 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
 
     def generate_inner(self, message, dataset=None):
         # import pdb;pdb.set_trace()
-        if self.enable_thinking_mode:
+        if self.enable_thinking:
             for i in range(len(message)):
                 if message[i]['type'] == 'text':
-                    message[i]['value'] += " First output the thinking process in <think> </think> tags and then output the final answer in <answer> </answer> tags."
+                    if self.enable_cot:
+                        message[i]['value'] += """You are tasked with answering a question about an image. Follow these steps carefully:
+                                            First, provide your detailed reasoning process within <think> </think> tags. After that, present the final answer within <answer> </answer> tags.
+                                            Here are the steps to guide your thinking:
+                                                1. Analyze the Image: Describe what you see in the image.
+                                                2. Understand the Question: Carefully read and interpret the question. Identify what specific
+                                                information or relationship the question is asking about.
+                                                3. Reason Step by Step: Combine the information from the image and the question to reason
+                                                through the problem. Break down your thought process into clear steps.
+                                                4. Evaluate the Choices: If multiple-choice options are provided, analyze each one and determine which best matches your reasoning.
+                                                5. Provide the Final Answer: Choose the most appropriate answer and output the final answer in <answer> </answer> tags.
+                                            """
+                    else:
+                        message[i]['value'] += "\nFirst output the thinking process in <think> </think> tags and then output the final answer in <answer> </answer> tags."
+                    
                     break
 
         if self.use_vllm:
@@ -682,12 +708,18 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         elif self.use_lmdeploy:
             response = self.generate_inner_lmdeploy(message, dataset=dataset)
         else:
-            response = self.generate_inner_transformers(message, dataset=dataset)
-         
-        if self.enable_thinking_mode:
-            response = self.extract_answer_from_thinking_response(response)
-        
-        return response
+            num_responses = max(1, self.majority_vote)
+            responses = []
+            
+            for _ in range(num_responses):
+                response = self.generate_inner_transformers(message, dataset=dataset)
+                
+                if self.enable_thinking:
+                    response = self.extract_answer_from_thinking_response(response)
+                
+                responses.append(response.replace('\n', ' ').strip())
+            
+            return responses if self.majority_vote > 1 else responses[0]
 
 
 class Qwen2VLChatAguvis(Qwen2VLChat):

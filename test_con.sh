@@ -98,23 +98,20 @@ run_one() {
 }
 
 
-export enable_thinking="False"
+export thinking_mode="True"
 experiments=(
-
-    
 
     "device=0 data=MathVista_MINI model_name=Qwen majority_vote=5 temperature=0.7" \
 
-    "device=0 data=MathVista_MINI model_name=Qwen majority_vote=5 temperature=0.7 \
+    "device=1 data=MathVista_MINI model_name=Qwen majority_vote=5 temperature=0.7 \
     enable_kdvz=True kdvz_ratio=0.5" \
 
-    "device=0 data=MathVista_MINI model_name=Qwen majority_vote=8 temperature=0.7" \
+    "device=2 data=MathVista_MINI model_name=Qwen majority_vote=8 temperature=0.7" \
 
-    "device=0 data=MathVista_MINI model_name=Qwen majority_vote=8 temperature=0.7 \
+    "device=3 data=MathVista_MINI model_name=Qwen majority_vote=8 temperature=0.7 \
     enable_kdvz=True kdvz_ratio=0.5" \
 
-    "device=0 data=MathVista_MINI model_name=Qwen majority_vote=5 temperature=0.7 enable_cot=True" \
-
+    
 )
 
 

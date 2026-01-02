@@ -256,7 +256,21 @@ def infer_data_job(
                 data['prediction'] = [data_all[x]['prediction'] for x in data['index']]
                 data['extra_records'] = [data_all[x]['extra_records'] for x in data['index']]
             else:
-                data['prediction'] = [str(data_all[x]) for x in data['index']]
+                # for majority voting
+                vals = [data_all[x] for x in data['index']]
+
+                if all(isinstance(v, list) for v in vals):
+                    if 'prediction' in data:
+                        data.pop('prediction')
+
+                    k = max(len(v) for v in vals) if len(vals) else 0
+                    for j in range(k):
+                        data[f'prediction_{j}'] = [
+                            v[j] if j < len(v) else ''
+                            for v in vals
+                        ]
+                else:
+                    data['prediction'] = [str(v) for v in vals]
         if 'image' in data:
             data.pop('image')
 

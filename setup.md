@@ -3,7 +3,7 @@
 Run `bash setup.sh`
 
 ## Running experiments
-To run experiments, run `bash test.sh`
+To run experiments, run `bash test.sh`. To run experiments consecutively, run `bash test.sh con` (remember to change the device numbers, refer to `test_con.sh`)
 
 In this file, there are parameters to change:
 
@@ -15,11 +15,11 @@ In this file, there are parameters to change:
 `enable_visionzip=False`\
 `visionzip_ratio=0.55`
 
-#### Pre-LLM KeyDiff Pruning (KeyDiff visionzip-style)
+#### Pre-LLM KeyDiff Pruning parameters (KeyDiff visionzip-style)
 `enable_kdvz=False`\
 `kdvz_ratio=0.5`
 
-#### Prefill KeyDiff Pruning
+#### Prefill KeyDiff Pruning parameters
 `enable_kd_kvcache=False`\
 `kvcache_anchor="all"`\
 `kvcache_ratio=0.5`\
@@ -30,20 +30,32 @@ In this file, there are parameters to change:
 `tokens_ratio=0.5`\
 `tokens_prune_layers=8` (can be multiple layers, for example `4,8,10`)
 
-#### Decode KeyDiff Pruning
+#### Decode KeyDiff Pruning parameters
 `enable_kd_decode=False`\
 `decode_anchor="all"`\
 `decode_ratio=0.0`\
 `decode_prune_window=50`\
 `decode_prune_after_layer=8`
 
+### Other parameters:
+`run_id`\
+`enable_thinking`\
+`enable_cot`\
+`majority_vote`\
+`temperature`
+
+## Running Majority Vote Experiments
+First run experiments as usual. This will produce raw log files.
+Find the script `majority.py`, change the input and output files, and run evaluation.
+
+Due to nature of VLMEvalKit, it's not straightforward to evaluate majority vote experiments so we resort to running generation and evaluation separately.
 
 ## Our contributions
 
 Relevant changes can be found in these files:
 
 Generic Qwen model for VLMEvalKit
-- `VLMEvalKit/vlmeval/config.py`, Line 1480-1503
+- `VLMEvalKit/vlmeval/config.py`
 
 Transformers modifications:
 - `VLMEvalKit/transformers/src/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py`

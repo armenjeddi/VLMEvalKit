@@ -1484,7 +1484,10 @@ qwen2vl_series = {
         min_pixels=1280 * 28 * 28,
         max_pixels=16384 * 28 * 28,
         use_custom_prompt=False,
+        enable_thinking=get_bool_env("enable_thinking", False),
+        enable_cot=get_bool_env("enable_cot", False),
 
+        majority_vote=int(os.environ.get("majority_vote", 1)),
         temperature=float(os.environ.get("temperature", 0.000001)),
 
         enable_visionzip=get_bool_env("enable_visionzip", False),
