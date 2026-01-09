@@ -2,11 +2,13 @@ from ...smp import *
 from ...utils import can_infer
 import timeout_decorator
 try:
-    from latex2sympy2 import latex2sympy
-except Exception as e:
-    logging.critical(f'{type(e)}: {e}')
-    logging.critical('Please install latex2sympy2 by running "pip install latex2sympy2"')
-    raise e
+    from latex2sympy2_extended import latex2sympy
+except ImportError:
+    try:
+        from latex2sympy2 import latex2sympy
+    except Exception as e:
+        logging.critical('Please install latex2sympy2_extended')
+        raise e
 
 
 FAIL_MSG = 'Failed to obtain answer via API.'

@@ -103,6 +103,9 @@ def extract_boxed_content(ans: str):
     content = ans[content_start:i]
     return content
 
+sys.path.append(os.path.abspath("/home/minhle/projects/aip-btaati/minhle/InternVL3_5-8B"))
+from modeling_internvl_chat import InternVLChatModel
+
 
 class InternVLChat(BaseModel):
     INSTALL_REQ = False
@@ -189,11 +192,11 @@ class InternVLChat(BaseModel):
             torch.cuda.set_device(0)
             self.device = 'cuda'
         else:
-            self.model = AutoModel.from_pretrained(
+            self.model = InternVLChatModel.from_pretrained(
                 model_path,
                 torch_dtype=torch.bfloat16,
                 load_in_8bit=load_in_8bit,
-                trust_remote_code=True,
+                trust_remote_code=False,
                 low_cpu_mem_usage=True,
                 device_map="auto").eval()
             self.device = 'cuda'
@@ -222,11 +225,30 @@ class InternVLChat(BaseModel):
         # self.image_size = self.model.config.vision_config.image_size
         self.version = version
         self.best_of_n = best_of_n
-        kwargs_default = dict(do_sample=False, max_new_tokens=4096, top_p=None)
-        kwargs_default.update(kwargs)
-        self.kwargs = kwargs_default
+        # kwargs_default = dict(do_sample=False, max_new_tokens=4096, top_p=None)
+        # kwargs_default.update(kwargs)
+        self.enable_thinking = kwargs.get('enable_thinking')
+        self.majority_vote = kwargs.get('majority_vote')
+        self.generate_kwargs = dict(
+            max_new_tokens=2048,
+            temperature=kwargs.get('temperature'),
+            top_p=None,
+            top_k=1,
+        )
+        
+        if self.generate_kwargs['temperature'] > 0.000001:
+            self.generate_kwargs['do_sample'] = True
+            self.generate_kwargs['top_p'] = 0.9
+            self.generate_kwargs['top_k'] = None
+        else:
+            self.generate_kwargs['do_sample'] = False
+            self.generate_kwargs['top_k'] = 1
 
-        warnings.warn(f'Following kwargs received: {self.kwargs}, will use as generation config. ')
+        from pprint import pprint
+        print("Generate kwargs:")
+        pprint(self.generate_kwargs)
+
+        # warnings.warn(f'Following kwargs received: {self.kwargs}, will use as generation config. ')
 
     def use_custom_prompt(self, dataset):
         assert dataset is not None
@@ -419,14 +441,14 @@ class InternVLChat(BaseModel):
 
         response_list = []
         for idx in range(self.best_of_n):
-            kwargs_default = self.kwargs.copy()
-            kwargs_default['do_sample'] = idx > 0 or kwargs_default.get('do_sample', False)
-            kwargs_default['temperature'] = 0.6
-            kwargs_default['top_p'] = 0.95
+            # kwargs_default = self.kwargs.copy()
+            # kwargs_default['do_sample'] = idx > 0 or kwargs_default.get('do_sample', False)
+            # kwargs_default['temperature'] = 0.6
+            # kwargs_default['top_p'] = 0.95
 
             if self.use_lmdeploy:
                 from lmdeploy import GenerationConfig
-                gen_config = GenerationConfig(**kwargs_default)
+                gen_config = GenerationConfig(**self.generate_kwargs)
                 gen_config.random_seed = None
                 messages_list = prepare_messages_list(prompt, image_path, system_prompt=self.system_prompt)
                 assert len(messages_list) == 1
@@ -440,8 +462,8 @@ class InternVLChat(BaseModel):
                     pixel_values=pixel_values,
                     num_patches_list=num_patches_list,
                     question=prompt,
-                    generation_config=kwargs_default,
-                    verbose=idx == 0,
+                    generation_config=self.generate_kwargs,
+                    verbose=False,
                 )
             response_list.append(response)
 
@@ -474,13 +496,23 @@ class InternVLChat(BaseModel):
 
     def generate_inner(self, message, dataset=None):
         self.set_max_num(dataset)
-        print(f'InternVL model version: {self.version}')
+        if self.enable_thinking:
+            for i in range(len(message)):
+                if message[i]['type'] == 'text':
+                    message[i]['value'] += "\nFirst output the thinking process in <think> </think> tags and then output the final answer in <answer> </answer> tags."
+                break
+
         if self.version in ['V1.1', 'V1.2']:
             return self.generate_v1_2(message, dataset)
         elif self.version == 'V1.5':
             return self.generate_v1_5(message, dataset)
         elif self.version == 'V2.0':
-            return self.generate_v2(message, dataset)
+            num_responses = max(1, self.majority_vote)
+            responses = []
+            for _ in range(num_responses):
+                response = self.generate_v2(message, dataset)
+                responses.append(response.replace('\n', ' ').strip())
+            return responses if num_responses > 1 else responses[0]
         else:
             raise ValueError(f'Unsupported version: {self.version}')
 

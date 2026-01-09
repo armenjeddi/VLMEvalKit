@@ -17,6 +17,11 @@ RBDash_ROOT = None
 VITA_ROOT = None
 LLAVA_V1_7B_MODEL_PTH = "Please set your local path to LLaVA-7B-v1.1 here, the model weight is obtained by merging LLaVA delta weight based on vicuna-7b-v1.1 in https://github.com/haotian-liu/LLaVA/blob/main/docs/MODEL_ZOO.md with vicuna-7b-v1.1. "
 
+def get_bool_env(var_name, default=False):
+    value = os.environ.get(var_name, str(default))
+    return value.lower() in ["1", "true", "yes"]
+
+
 video_models = {
     "Video-LLaVA-7B": partial(VideoLLaVA, model_path="LanguageBind/Video-LLaVA-7B"),
     "Video-LLaVA-7B-HF": partial(
@@ -1001,6 +1006,37 @@ internvl2_5_mpo = {
 }
 
 internvl3 = {
+
+    "InternVL": partial(
+        InternVLChat, model_path="/home/minhle/projects/aip-btaati/minhle/InternVL3_5-8B", version="V2.0",
+        enable_thinking=get_bool_env("enable_thinking", False),
+        # enable_cot=get_bool_env("enable_cot", False),
+
+        majority_vote=int(os.environ.get("majority_vote", 1)),
+        temperature=float(os.environ.get("temperature", 0.000001)),
+
+        # enable_visionzip=get_bool_env("enable_visionzip", False),
+        # visionzip_ratio=float(os.environ.get("visionzip_ratio", 0.0)),
+
+        enable_kdvz=get_bool_env("enable_kdvz", False),
+        kdvz_ratio=float(os.environ.get("kdvz_ratio", 0.0)),
+
+        # enable_kd_kvcache=get_bool_env("enable_kd_kvcache", False),
+        # kvcache_anchor=os.environ.get("kvcache_anchor", "all"),
+        # kvcache_ratio=float(os.environ.get("kvcache_ratio", 0.0)),
+        # kvcache_prune_after_layer=int(os.environ.get("kvcache_prune_after_layer", 8)),
+
+        # enable_kd_tokens=get_bool_env("enable_kd_tokens", False),
+        # tokens_anchor=os.environ.get("tokens_anchor", "all"),
+        # tokens_ratio=float(os.environ.get("tokens_ratio", 0.0)),
+        # tokens_prune_layers=os.environ.get("tokens_prune_layers", "7,15,23"),
+
+        # enable_kd_decode=get_bool_env("enable_kd_decode", False),
+        # decode_anchor=os.environ.get("decode_anchor", "all"),
+        # decode_ratio=float(os.environ.get("decode_ratio", 0.0)),
+        # decode_prune_window=int(os.environ.get("decode_prune_window", 50)),
+        # decode_prune_after_layer=int(os.environ.get("decode_prune_after_layer", 8))
+    ),
     "InternVL3-1B": partial(
         InternVLChat, model_path="OpenGVLab/InternVL3-1B", version="V2.0"
     ),
@@ -1472,10 +1508,6 @@ hawkvl_series = {
         use_custom_prompt=True
     )
 }
-
-def get_bool_env(var_name, default=False):
-    value = os.environ.get(var_name, str(default))
-    return value.lower() in ["1", "true", "yes"]
 
 qwen2vl_series = {
     "Qwen": partial(

@@ -91,12 +91,13 @@ class ImageBaseDataset:
 
         self.data_path = data_path
         if osp.exists(data_path):
-            if file_md5 is None or md5(data_path) == file_md5:
-                pass
-            else:
-                warnings.warn(f'The tsv file is in {data_root}, but the md5 does not match, will re-download')
-                download_file(url, data_path)
-                update_flag = True
+            pass
+            # if file_md5 is None or md5(data_path) == file_md5:
+            #     pass
+            # else:
+            #     warnings.warn(f'The tsv file is in {data_root}, but the md5 does not match, will re-download')
+            #     download_file(url, data_path)
+            #     update_flag = True
         else:
             if osp.exists(data_path_legacy) and (file_md5 is None or md5(data_path_legacy) == file_md5):
                 warnings.warn(

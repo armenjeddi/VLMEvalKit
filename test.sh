@@ -1,9 +1,10 @@
 #!/bin/bash
 
-export HF_HOME="~/.cache/huggingface"
+export HF_HOME="/home/minhle/projects/aip-btaati/shared/minhle/.cache/huggingface"
 date_tag=$(date +"%b%d" | tr '[:upper:]' '[:lower:]')
 
 QWEN25_7B="Qwen/Qwen2.5-VL-7B-Instruct"
+INTERNVL="OpenGVLab/InternVL3_5-4B"
 
 
 mode="${1:-seq}"

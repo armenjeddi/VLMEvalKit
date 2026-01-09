@@ -277,11 +277,6 @@ class Qwen2_5_VLVisionAttention(nn.Module):
         attn_output = attn_output.reshape(seq_length, -1).contiguous()
         attn_output = self.proj(attn_output)
 
-        # if enable_visionzip:
-        #     return attn_output, attn_weights, k
-        # elif enable_kdvz:
-        #     return attn_output, None, k
-
         return attn_output, attn_weights, k
 
 
@@ -1391,7 +1386,6 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         split_sizes = (image_grid_thw.prod(-1) // self.visual.spatial_merge_size**2).tolist()
         image_embeds = torch.split(image_embeds, split_sizes)
         return image_embeds, attn_logits, attn_key
-        # return image_embeds
 
     def get_placeholder_mask(
         self,
@@ -1558,7 +1552,6 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
                 delta = delta.repeat_interleave(batch_size // delta.shape[0], dim=1)
                 position_ids += delta.to(position_ids.device)
 
-        # print('inputs_embeds.shape before visionzip:', inputs_embeds.shape)
         if select_pixel and enable_visionzip:
             dominant_tokens_ratio = 1 - visionzip_ratio
             dominant_num = int(dominant_tokens_ratio * attn_logits.size(0))

@@ -3,7 +3,7 @@
 Run `bash setup.sh`
 
 ## Running experiments
-To run experiments, run `bash test.sh`. To run experiments consecutively, run `bash test.sh con` (remember to change the device numbers, refer to `test_con.sh`)
+To run experiments, run `bash test.sh`. To run experiments consecutively, run `bash test.sh con` (remember to change the device numbers)
 
 In this file, there are parameters to change:
 
