@@ -256,6 +256,7 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             decode_ratio=decode_ratio,
             decode_prune_window=decode_prune_window,
             decode_prune_after_layer=decode_prune_after_layer,
+            num_return_sequences=majority_vote
         )
         self.system_prompt = system_prompt
         self.verbose = verbose
@@ -542,33 +543,36 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             **self.generate_kwargs,
         )
         generated_ids = [
-            output_ids[len(input_ids):] for input_ids, output_ids in zip(inputs.input_ids, generated_ids)
+            output_ids[len(input_ids):] for input_ids, output_ids in zip(inputs.input_ids.repeat(generated_ids.shape[0], 1), generated_ids)
         ]
         out = self.processor.tokenizer.batch_decode(
             generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )
-        response = out[0]
-        if self.post_process:
-            resp = response.split('\\boxed{')[-1]
-            lt = len(resp)
-            counter, end = 1, None
-            for i in range(lt):
-                if resp[i] == '{':
-                    counter += 1
-                elif resp[i] == '}':
-                    counter -= 1
-                if counter == 0:
-                    end = i
-                    break
-                elif i == lt - 1:
-                    end = lt
-                    break
-            if end is not None:
-                response = resp[:end]
+        responses = []
+        for response in out:
+            if self.post_process:
+                resp = response.split('\\boxed{')[-1]
+                lt = len(resp)
+                counter, end = 1, None
+                for i in range(lt):
+                    if resp[i] == '{':
+                        counter += 1
+                    elif resp[i] == '}':
+                        counter -= 1
+                    if counter == 0:
+                        end = i
+                        break
+                    elif i == lt - 1:
+                        end = lt
+                        break
+                if end is not None:
+                    response = resp[:end]
 
-        if self.verbose:
-            print(f'\033[32m{response}\033[0m')
-        return response
+            if self.verbose:
+                print(f'\033[32m{response}\033[0m')
+            responses.append(response)
+        # print(responses)
+        return responses if len(responses) > 1 else responses[0]
 
     def generate_inner_lmdeploy(self, message, dataset=None):
         from lmdeploy import GenerationConfig
@@ -710,17 +714,21 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         else:
             num_responses = max(1, self.majority_vote)
             responses = []
-            
-            for _ in range(num_responses):
-                response = self.generate_inner_transformers(message, dataset=dataset)
-                
-                if self.enable_thinking:
-                    response = self.extract_answer_from_thinking_response(response)
-                
-                responses.append(response.replace('\n', ' ').strip())
-            
+            responses = self.generate_inner_transformers(message, dataset=dataset)
+            if self.enable_thinking:
+                responses = [self.extract_answer_from_thinking_response(response).replace('\n', ' ').strip() for response in responses]
+            assert num_responses == len(responses), [num_responses, len(responses)]
             return responses if self.majority_vote > 1 else responses[0]
-
+            # for _ in range(num_responses):
+            #     response = self.generate_inner_transformers(message, dataset=dataset)
+                
+            #     if self.enable_thinking:
+            #         response = self.extract_answer_from_thinking_response(response)
+                
+            #     responses.append(response.replace('\n', ' ').strip())
+            
+            # return responses if self.majority_vote > 1 else responses[0]
+        return response
 
 class Qwen2VLChatAguvis(Qwen2VLChat):
     def __init__(self, mode=None, **kwargs):

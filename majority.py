@@ -85,7 +85,6 @@ def can_infer_option(answer, choices):
     if count == 1:
         for ch in choices:
             if 'A' in splits and len(splits) > 3:
-                # 'A' might be a quantifier, ignore if sentence is long
                 return False
             if ch in splits and splits.index(ch) > (len(splits) - 5):
                 return ch
@@ -150,7 +149,6 @@ def post_check_mathvision(line, prefetch=False):
     ans = line['answer']
     response = line['prediction'] if prefetch else line['res']
     
-    # Handle Choices (Multiple Choice)
     try:
         choices_list = eval(line['choices']) if isinstance(line['choices'], str) else line['choices']
         if len(choices_list) > 0:
@@ -165,14 +163,12 @@ def post_check_mathvision(line, prefetch=False):
     except (ValueError, SyntaxError):
         pass
 
-    # Handle Equality Check (Open ended / Numeric)
     try:
         if is_equal_mathvision(res, ans):
             return res if prefetch else True
         else:
             return False
     except Exception as err:
-        # logging.warning(f'{type(err)}: {err}')
         return False
 
 def MathVision_acc(df):
@@ -206,7 +202,6 @@ def MathVision_acc(df):
 # ==========================================
 
 def get_mathvista_gpt4_ICE():
-    # (Same as your original script)
     return [
         """Hint: Please answer the question requiring an integer answer and provide the final value, e.g., 1, 2, 3, at the end.\nQuestion: Which number is missing?\nModel response: The number missing in the sequence is 14.\nExtracted answer: 14""",
         """Hint: Please answer the question requiring a floating-point number with one decimal place and provide the final value, e.g., 1.2, 1.3, 1.4, at the end.\nQuestion: What is the fraction of females facing the camera?\nModel response: The fraction of females facing the camera is 0.6, which means that six out of ten females in the group are facing the camera.\nExtracted answer: 0.6""",
@@ -236,10 +231,8 @@ def post_check_mathvista(line, prefetch=False):
         if line['question_type'] == 'multi_choice':
             ans = line['answer_option']
             choices = list_to_dict(eval(line['choices']))
-            # Use can_infer from VLMEvalKitUtils for better matching even in MathVista
             res = can_infer(response, choices)
             
-            # Fallback to simple char check if can_infer fails or returns None/False
             if not res:
                 res = str(response).strip().upper() if len(str(response).strip()) == 1 else None
             
@@ -336,7 +329,6 @@ def build_mathverse_gpt4_score_prompt(line):
     task_description = """Below are two answers to a math question. Question is [Question], [Standard Answer] is the standard answer to the question, and [Model_answer] is the answer extracted from a model's output to this question.  Determine whether these two answers are consistent.
 Please note that only when the [Model_answer] completely matches the [Standard Answer] means they are consistent. For non-multiple-choice questions, if the meaning is expressed in the same way, it is also considered consistent, for example, 0.5m and 50cm.
 If they are consistent, Judement is 1; if they are different, Judement is 0.\n\n"""
-    # Use 'question' if 'question_for_eval' is missing (common in some csv exports)
     question_for_eval = line.get('question_for_eval', line.get('question', '')) 
     extract = line['extract']
     answer = line['answer']
@@ -363,13 +355,10 @@ def post_check_mathverse(line, client=None):
     # In the accuracy loop, 'prediction' contains the extracted answer
     response = str(line['prediction']).strip()
 
-    # 1. Exact Match
     if response == ans:
         return True
     
-    # 2. LLM Judge (Scoring)
     if client:
-        # Prepare dict for the prompt builder
         eval_line = {
             'question': line.get('question', ''),
             'question_for_eval': line.get('question', ''),
@@ -381,7 +370,7 @@ def post_check_mathverse(line, client=None):
         for i in range(5):
             try:
                 api_res = client.chat.completions.create(
-                    model="gpt-4", # MathVerse standard uses GPT-4 for scoring
+                    model="gpt-4",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=i * 0.5,
                     max_tokens=10
@@ -401,24 +390,18 @@ def MathVerse_acc(df, client):
     """
     print("Calculating MathVerse Accuracy (this involves LLM scoring for mismatches)...")
     
-    # 1. Parse Metadata
-    # Ensure metadata is a dict. If string, parse it.
     try:
         if isinstance(df.iloc[0]['metadata'], str):
-            # Fix potential single quote issues if they exist, though standard json is double
             df['metadata'] = df['metadata'].apply(lambda x: x.replace("'", '"') if isinstance(x, str) else x)
             df['metadata'] = df['metadata'].apply(json.loads)
     except Exception as e:
         print(f"Warning: Metadata parsing failed or already dict: {e}")
 
-    # Expand metadata columns (problem_version, subject, subfield)
     meta_df = pd.json_normalize(df['metadata'])
-    # Merge back ensuring index alignment
     df = df.reset_index(drop=True)
     meta_df = meta_df.reset_index(drop=True)
     df = pd.concat([df, meta_df], axis=1)
 
-    # 2. Calculate Score (Row by Row)
     scores = []
     for idx, row in df.iterrows():
         if idx % 50 == 0:
@@ -428,8 +411,6 @@ def MathVerse_acc(df, client):
     
     df['score'] = scores
 
-    # 3. Aggregate Results
-    # Logic adapted from vlmevalkit MathVerse_acc
     subset = list(set(df['problem_version']))
     if 'Overall' not in subset:
         subset.append('Overall')
@@ -442,10 +423,8 @@ def MathVerse_acc(df, client):
             sub = df.copy()
             
         res['split'].append(p)
-        # Overall Acc for this split
         res['Overall'].append(np.mean(sub['score']) * 100)
         
-        # Subject Acc
         if 'subject' in df.columns:
             subjects = set(df['subject'].dropna())
             for k in subjects:
@@ -453,7 +432,6 @@ def MathVerse_acc(df, client):
                 acc = np.mean(sub_k['score']) * 100 if len(sub_k) > 0 else 0
                 res[k].append(acc)
                 
-        # Subfield Acc
         if 'subfield' in df.columns:
             subfields = set(df['subfield'].dropna())
             for k in subfields:
