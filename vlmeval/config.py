@@ -1008,7 +1008,7 @@ internvl2_5_mpo = {
 internvl3 = {
 
     "InternVL": partial(
-        InternVLChat, model_path="/home/minhle/projects/aip-btaati/minhle/InternVL3_5-8B", version="V2.0",
+        InternVLChat, model_path=os.environ.get("model_path", "/home/minhle/projects/aip-btaati/minhle/InternVL3_5-8B"), version="V2.0",
         enable_thinking=get_bool_env("enable_thinking", False),
         # enable_cot=get_bool_env("enable_cot", False),
 
