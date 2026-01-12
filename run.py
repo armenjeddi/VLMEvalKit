@@ -349,6 +349,10 @@ def main():
 
                 # Set the judge kwargs first before evaluation or dumping
 
+
+                num_total_dataset_generated_tokens = model.num_total_dataset_generated_tokens
+                total_inference_time_in_seconds = model.total_inference_time_in_seconds
+
                 judge_kwargs = {
                     'nproc': args.api_nproc,
                     'verbose': args.verbose,

@@ -6,6 +6,7 @@ import warnings
 import math
 import logging
 import re
+import time
 
 import torch
 from transformers import StoppingCriteria
@@ -186,28 +187,20 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         max_new_tokens=2048,
         top_p=0.001,
         top_k=1,
-        majority_vote=1,
         temperature=0.01,
         repetition_penalty=1.0,
         use_kv_cache: bool = True,
-        enable_cot=False,
-        enable_visionzip=False,
-        visionzip_ratio=0.0,
+
         enable_kdvz=False,
         kdvz_ratio=0.0,
-        enable_kd_kvcache=False,
-        kvcache_anchor='all',
-        kvcache_ratio=0.0,
-        kvcache_prune_after_layer=8,
+
         enable_kd_tokens=False,
         tokens_anchor='all',
         tokens_ratio=0.0,
         tokens_prune_layers='7,15,23',
-        enable_kd_decode=False,
-        decode_anchor='all',
-        decode_ratio=0.0,
-        decode_prune_window=50,
-        decode_prune_after_layer=8,
+
+        num_return_sequences= 1,
+        
         use_custom_prompt: bool = True,
         system_prompt: str | None = None,
         post_process: bool = False,  # if True, will try to only extract stuff in the last \boxed{}.
@@ -223,15 +216,16 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         if self.total_pixels and self.total_pixels > 24576 * 28 * 28:
             print('The total number of video tokens might become too large, resulting in an overly long input sequence. We recommend lowering **total_pixels** to below **24576 × 28 × 28**.')  # noqa: E501
 
-        if temperature > 0.000001:
+        if temperature > 0.01 and num_return_sequences > 1:
             top_p = 0.9
             top_k = None
         else:
             top_p = 0.001
             top_k = 1
 
-        self.majority_vote = majority_vote
-        self.enable_cot = enable_cot
+        self.total_inference_time_in_seconds = 0
+        self.num_total_dataset_generated_tokens = 0
+        self.enable_thinking = kwargs.get('enable_thinking', True)
         self.generate_kwargs = dict(
             max_new_tokens=self.max_new_tokens,
             top_p=top_p,
@@ -239,24 +233,16 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             temperature=temperature,
             repetition_penalty=repetition_penalty,
             use_cache=use_kv_cache,
-            enable_visionzip=enable_visionzip,
-            visionzip_ratio=visionzip_ratio,
+            
             enable_kdvz=enable_kdvz,
             kdvz_ratio=kdvz_ratio,
-            enable_kd_kvcache=enable_kd_kvcache,
-            kvcache_anchor=kvcache_anchor,
-            kvcache_ratio=kvcache_ratio,
-            kvcache_prune_after_layer=kvcache_prune_after_layer,
+            
             enable_kd_tokens=enable_kd_tokens,
             tokens_anchor=tokens_anchor,
             tokens_ratio=tokens_ratio,
             tokens_prune_layers=tokens_prune_layers,
-            enable_kd_decode=enable_kd_decode,
-            decode_anchor=decode_anchor,
-            decode_ratio=decode_ratio,
-            decode_prune_window=decode_prune_window,
-            decode_prune_after_layer=decode_prune_after_layer,
-            num_return_sequences=majority_vote
+            
+            num_return_sequences=num_return_sequences
         )
         self.system_prompt = system_prompt
         self.verbose = verbose
@@ -341,8 +327,6 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                 model_path, torch_dtype='auto', device_map="auto", attn_implementation='flash_attention_2'
             )
             self.model.eval()
-
-        self.enable_thinking = kwargs.get('enable_thinking')
 
         from pprint import pprint
         print("Generate kwargs:")
@@ -542,12 +526,14 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             **inputs,
             **self.generate_kwargs,
         )
+
         generated_ids = [
-            output_ids[len(input_ids):] for input_ids, output_ids in zip(inputs.input_ids.repeat(generated_ids.shape[0], 1), generated_ids)
+            output_ids[len(input_ids):] for input_ids, output_ids in zip(inputs.input_ids.repeat(generated_ids.shape[0],1), generated_ids)
         ]
         out = self.processor.tokenizer.batch_decode(
             generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )
+
         responses = []
         for response in out:
             if self.post_process:
@@ -571,8 +557,7 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             if self.verbose:
                 print(f'\033[32m{response}\033[0m')
             responses.append(response)
-        # print(responses)
-        return responses if len(responses) > 1 else responses[0]
+        return responses
 
     def generate_inner_lmdeploy(self, message, dataset=None):
         from lmdeploy import GenerationConfig
@@ -686,25 +671,10 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         return generated_text
 
     def generate_inner(self, message, dataset=None):
-        # import pdb;pdb.set_trace()
         if self.enable_thinking:
             for i in range(len(message)):
                 if message[i]['type'] == 'text':
-                    if self.enable_cot:
-                        message[i]['value'] += """You are tasked with answering a question about an image. Follow these steps carefully:
-                                            First, provide your detailed reasoning process within <think> </think> tags. After that, present the final answer within <answer> </answer> tags.
-                                            Here are the steps to guide your thinking:
-                                                1. Analyze the Image: Describe what you see in the image.
-                                                2. Understand the Question: Carefully read and interpret the question. Identify what specific
-                                                information or relationship the question is asking about.
-                                                3. Reason Step by Step: Combine the information from the image and the question to reason
-                                                through the problem. Break down your thought process into clear steps.
-                                                4. Evaluate the Choices: If multiple-choice options are provided, analyze each one and determine which best matches your reasoning.
-                                                5. Provide the Final Answer: Choose the most appropriate answer and output the final answer in <answer> </answer> tags.
-                                            """
-                    else:
-                        message[i]['value'] += "\nFirst output the thinking process in <think> </think> tags and then output the final answer in <answer> </answer> tags."
-                    
+                    message[i]['value'] += "\nFirst output the thinking process in <think> </think> tags and then output the final answer in <answer> </answer> tags."
                     break
 
         if self.use_vllm:
@@ -712,23 +682,20 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         elif self.use_lmdeploy:
             response = self.generate_inner_lmdeploy(message, dataset=dataset)
         else:
-            num_responses = max(1, self.majority_vote)
-            responses = []
+            start_time = time.time()
             responses = self.generate_inner_transformers(message, dataset=dataset)
-            if self.enable_thinking:
-                responses = [self.extract_answer_from_thinking_response(response).replace('\n', ' ').strip() for response in responses]
-            assert num_responses == len(responses), [num_responses, len(responses)]
-            return responses if self.majority_vote > 1 else responses[0]
-            # for _ in range(num_responses):
-            #     response = self.generate_inner_transformers(message, dataset=dataset)
-                
-            #     if self.enable_thinking:
-            #         response = self.extract_answer_from_thinking_response(response)
-                
-            #     responses.append(response.replace('\n', ' ').strip())
+            self.total_inference_time_in_seconds += time.time() - start_time
+            final_answers = []
+            # import pdb; pdb.set_trace()
+            for response in responses:
+                num_generated_tokens = self.processor.tokenizer(response, return_tensors="pt").input_ids.shape[1]
+                self.num_total_dataset_generated_tokens += num_generated_tokens
+                if self.enable_thinking:
+                    response = self.extract_answer_from_thinking_response(response)
+                final_answers.append(response.replace('\n', ' ').strip())
             
-            # return responses if self.majority_vote > 1 else responses[0]
-        return response
+            return final_answers
+
 
 class Qwen2VLChatAguvis(Qwen2VLChat):
     def __init__(self, mode=None, **kwargs):

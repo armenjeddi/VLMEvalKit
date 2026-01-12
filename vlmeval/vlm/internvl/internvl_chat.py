@@ -103,8 +103,6 @@ def extract_boxed_content(ans: str):
     content = ans[content_start:i]
     return content
 
-sys.path.append(os.path.abspath("/home/minhle/projects/aip-btaati/minhle/InternVL3_5-8B"))
-from modeling_internvl_chat import InternVLChatModel
 
 
 class InternVLChat(BaseModel):

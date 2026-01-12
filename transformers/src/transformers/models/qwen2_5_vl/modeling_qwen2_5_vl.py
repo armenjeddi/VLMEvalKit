@@ -1027,6 +1027,7 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
 
 
             elif enable_kd_tokens and i in [int(x) for x in tokens_prune_layers.split(",")] and prefilling:
+                # import pdb; pdb.set_trace()
                 bsz, seq_len, _ = hidden_states.shape
                 number_of_vision_tokens = seq_len - number_of_text_tokens
                 n_keep_vis = int(number_of_vision_tokens * (1.0 - tokens_ratio))
@@ -1034,7 +1035,7 @@ class Qwen2_5_VLTextModel(Qwen2_5_VLPreTrainedModel):
                 module = getattr(decoder_layer, "self_attn", None)
                 cache_layer = past_key_values.layers[module.layer_idx]
 
-                norm_keys = F.normalize(cache_layer.keys, p=2, dim=-1)
+                norm_keys = F.normalize(cache_layer.keys[:1], p=2, dim=-1)
                 
                 vision_keys = norm_keys[:, :, :number_of_vision_tokens, :]
                 text_keys = norm_keys[:, :, number_of_vision_tokens:, :]
@@ -1492,6 +1493,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
 
         number_of_text_tokens = None
         select_pixel = False
+        batch_size = inputs_embeds.shape[0] ## when num_return_sequences > 1
         if pixel_values is not None:
             select_pixel = True
 
@@ -1503,7 +1505,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
 
             ### the following two params are used for pruning
-            number_of_text_tokens = inputs_embeds.shape[1] - image_embeds.shape[0]
+            number_of_text_tokens = inputs_embeds.shape[1] - image_embeds.shape[0] // batch_size
             placeholder_vision_token = self.config.image_token_id
 
         if pixel_values_videos is not None:
@@ -1516,7 +1518,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
 
             ### the following two params are used for pruning
-            number_of_text_tokens = inputs_embeds.shape[1] - video_embeds.shape[0]
+            number_of_text_tokens = inputs_embeds.shape[1] - video_embeds.shape[0] // batch_size
             placeholder_vision_token = self.config.video_token_id
 
         if position_ids is None:
@@ -1600,8 +1602,8 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         if select_pixel and enable_kdvz:
             # inputs_embeds shape: 1, num_tokens, embed_dim
             # attn_key shape: num_heads, num_tokens, key_dim
-            
-            num_tokens = attn_key.size(1)
+            num_tokens = attn_key.size(1) // batch_size
+            attn_key = attn_key[:, :num_tokens, :]
             n_keep = int(num_tokens * (1.0 - kdvz_ratio))
             norm_keys = F.normalize(attn_key, p=2, dim=-1)
             
@@ -1615,7 +1617,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             select_mask = torch.zeros(num_tokens, dtype=torch.bool, device=attn_key.device)
             select_mask[keep_idx] = True
 
-            img_mask = (input_ids == placeholder_vision_token)[0]
+            img_mask = (input_ids[:1] == placeholder_vision_token)[0]
             
             st_idx = torch.nonzero(img_mask, as_tuple=True)[0]
             if st_idx.numel() > 0:
