@@ -1526,7 +1526,7 @@ qwen2vl_series = {
         enable_kd_tokens=get_bool_env("enable_kd_tokens", False),
         tokens_anchor=os.environ.get("tokens_anchor", "all"),
         tokens_ratio=float(os.environ.get("tokens_ratio", 0.0)),
-        tokens_prune_layers=os.environ.get("tokens_prune_layers", "4"),
+        tokens_prune_layers=os.environ.get("tokens_prune_layers", "3"),
 
         num_return_sequences=int(os.environ.get("num_return_sequences", 1)),
 

@@ -352,6 +352,8 @@ def main():
 
                 num_total_dataset_generated_tokens = model.num_total_dataset_generated_tokens
                 total_inference_time_in_seconds = model.total_inference_time_in_seconds
+                total_initial_input_visual_tokens = model.total_initial_input_visual_tokens
+                total_input_text_tokens = model.total_input_text_tokens
 
                 judge_kwargs = {
                     'nproc': args.api_nproc,

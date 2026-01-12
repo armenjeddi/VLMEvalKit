@@ -225,6 +225,8 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
 
         self.total_inference_time_in_seconds = 0
         self.num_total_dataset_generated_tokens = 0
+        self.total_initial_input_visual_tokens = 0
+        self.total_input_text_tokens = 0
         self.enable_thinking = kwargs.get('enable_thinking', True)
         self.generate_kwargs = dict(
             max_new_tokens=self.max_new_tokens,
@@ -516,6 +518,19 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             images, videos = process_vision_info([messages])
             inputs = self.processor(text=text, images=images, videos=videos, padding=True, return_tensors='pt')  # noqa: E501
         inputs = inputs.to('cuda')
+
+        sample_initial_visual_tokens = 0
+        if 'video_grid_thw' in inputs:
+            sample_initial_visual_tokens = inputs.video_grid_thw.prod().item() // 4
+        elif 'image_grid_thw' in inputs:
+            sample_initial_visual_tokens = inputs.image_grid_thw.prod().item() // 4
+        else:
+            raise ValueError("Either image or video must be passed")
+
+        sample_text_tokens = inputs.input_ids.shape[1] - sample_initial_visual_tokens
+
+        self.total_initial_input_visual_tokens += sample_initial_visual_tokens
+        self.total_input_text_tokens += sample_text_tokens
 
         if listinstr(['omni'], self.model_path.lower()):
             self.generate_kwargs['use_audio_in_video'] = self.use_audio_in_video
