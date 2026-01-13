@@ -16,7 +16,7 @@ if [[ "$mode" != "seq" && "$mode" != "con" ]]; then
 fi
 
 unset_all() {
-    for v in model_path majority_vote temperature \
+    for v in model_path num_return_sequences temperature \
             enable_visionzip visionzip_ratio enable_kdvz kdvz_ratio \
             enable_kd_kvcache kvcache_anchor kvcache_ratio kvcache_prune_after_layer \
             enable_kd_tokens tokens_anchor tokens_ratio tokens_prune_layers \
@@ -31,7 +31,7 @@ set_defaults() {
     model_name="${model_name:-Qwen}"
     data="${data:-MME}"
     device="${device:-0}"
-    majority_vote="${majority_vote:-1}"
+    num_return_sequences="${num_return_sequences:-1}"
     temperature="${temperature:-0.000001}"
 }
 
@@ -44,8 +44,8 @@ run_one() {
         config_tags+=("run${run_id}")
     fi
 
-    if [[ "${majority_vote}" -gt 1 ]]; then
-        config_tags+=("major${majority_vote}")
+    if [[ "${num_return_sequences}" -gt 1 ]]; then
+        config_tags+=("major${num_return_sequences}")
     fi
 
     if awk "BEGIN{exit !(${temperature} > 0.000001)}"; then
@@ -85,7 +85,7 @@ run_one() {
     fi
 
     export model_path \
-        majority_vote temperature enable_cot \
+        num_return_sequences temperature \
         enable_visionzip visionzip_ratio enable_kdvz kdvz_ratio \
         enable_kd_kvcache kvcache_anchor kvcache_ratio kvcache_prune_after_layer \
         enable_kd_tokens tokens_anchor tokens_ratio tokens_prune_layers \
@@ -99,22 +99,19 @@ run_one() {
 }
 
 
-export enable_thinking="False"
+export enable_thinking="True"
 experiments=(
 
-    
+    "device=0 data=MathVista_MINI model_name=Qwen" \
 
-    "device=0 data=MathVista_MINI model_name=Qwen majority_vote=5 temperature=0.7" \
-
-    "device=0 data=MathVista_MINI model_name=Qwen majority_vote=5 temperature=0.7 \
+    "device=0 data=MathVista_MINI model_name=Qwen \
     enable_kdvz=True kdvz_ratio=0.5" \
 
-    "device=0 data=MathVista_MINI model_name=Qwen majority_vote=8 temperature=0.7" \
+    "device=0 data=MathVista_MINI model_name=Qwen \
+    enable_kd_tokens=True tokens_anchor='all' tokens_ratio=0.5 tokens_prune_layers='4'" \
 
-    "device=0 data=MathVista_MINI model_name=Qwen majority_vote=8 temperature=0.7 \
-    enable_kdvz=True kdvz_ratio=0.5" \
-
-    "device=0 data=MathVista_MINI model_name=Qwen majority_vote=5 temperature=0.7 enable_cot=True" \
+    "device=0 data=MathVista_MINI model_name=Qwen \
+    num_return_sequences=5 temperature=0.7" \
 
 )
 

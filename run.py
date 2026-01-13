@@ -355,6 +355,17 @@ def main():
                 total_initial_input_visual_tokens = model.total_initial_input_visual_tokens
                 total_input_text_tokens = model.total_input_text_tokens
 
+                tokens_log = {
+                    "Total Generated Tokens": num_total_dataset_generated_tokens,
+                    "Total Inference Time (s)": total_inference_time_in_seconds,
+                    "Total Input Visual Tokens": total_initial_input_visual_tokens,
+                    "Total Input Text Tokens": total_input_text_tokens,
+                }
+
+                tokens_log_file = osp.join(pred_root_meta, f'{model_name}_{dataset_name}_tokens_log.json')
+
+                dump(tokens_log, tokens_log_file)
+
                 judge_kwargs = {
                     'nproc': args.api_nproc,
                     'verbose': args.verbose,

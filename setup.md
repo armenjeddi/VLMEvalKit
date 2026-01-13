@@ -24,18 +24,17 @@ Change this to your own HF_HOME path to access downloaded HF checkpoints.
 #### Other parameters:
 `run_id` - helpful for when running multiple experiments with identical configurations, as the output folder names will be different\
 `enable_thinking` - force model to generate thinking\
-`enable_cot` - force model to generate chain-of-thought thinking\
 
 ## Majority Voting Parameters
-`majority_vote` - number of responses per question \
+`num_return_sequences` - number of responses per question \
 `temperature` - generation temperature, needs to be set to around 0.5-0.7 for majority vote experiments
 
 
 ## Pruning Parameters
-
-#### VisionZip parameters
+<!-- 
+#### VisionZip parameters (not used anymore)
 `enable_visionzip=False`\
-`visionzip_ratio=0.55`
+`visionzip_ratio=0.55` -->
 
 #### Pre-LLM KeyDiff Pruning parameters (KeyDiff visionzip-style)
 `enable_kdvz=True/False`\
@@ -47,7 +46,7 @@ Change this to your own HF_HOME path to access downloaded HF checkpoints.
 `tokens_ratio=0.5` (float between 0.0 to 1.0)\
 `tokens_prune_layers=8` (can be multiple layers, for example `4,8,10`)
 
-#### Prefill KeyDiff KV-Cache Pruning parameters (not used anymore)
+<!-- #### Prefill KeyDiff KV-Cache Pruning parameters (not used anymore)
 `enable_kd_kvcache=True/False`\
 `kvcache_anchor="all"/"text"/"vision"`\
 `kvcache_ratio=0.5` (float between 0.0 to 1.0)\
@@ -58,7 +57,7 @@ Change this to your own HF_HOME path to access downloaded HF checkpoints.
 `decode_anchor="all"`\
 `decode_ratio=0.0` (float between 0.0 to 1.0)\
 `decode_prune_window=50`\
-`decode_prune_after_layer=8`
+`decode_prune_after_layer=8` -->
 
 
 

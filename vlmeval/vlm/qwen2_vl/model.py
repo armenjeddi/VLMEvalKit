@@ -199,7 +199,7 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         tokens_ratio=0.0,
         tokens_prune_layers='7,15,23',
 
-        num_return_sequences= 1,
+        num_return_sequences=1,
         
         use_custom_prompt: bool = True,
         system_prompt: str | None = None,
@@ -709,7 +709,7 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                     response = self.extract_answer_from_thinking_response(response)
                 final_answers.append(response.replace('\n', ' ').strip())
             
-            return final_answers
+            return final_answers[0] if len(final_answers) == 1 else final_answers
 
 
 class Qwen2VLChatAguvis(Qwen2VLChat):
