@@ -686,9 +686,21 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         return generated_text
 
     def generate_inner(self, message, dataset=None):
+        if len(message) > 2: # basically in videos right now
+            cleaned_messages = []
+            for i in range(len(message)):
+                if not (message[i]['type'] == 'text'):
+                    cleaned_messages.append(message[i])
+                if message[i]['type'] == 'text' and i == len(message) - 1:
+
+                    cleaned_messages.append(message[i])
+
+            message = cleaned_messages
+
         if self.enable_thinking:
             for i in range(len(message)):
                 if message[i]['type'] == 'text':
+                    message[i]['value'] = message[i]['value'].replace('\nAnswer:', '')
                     message[i]['value'] += "\nFirst output the thinking process in <think> </think> tags and then output the final answer in <answer> </answer> tags."
                     break
 
