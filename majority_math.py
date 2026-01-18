@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 import json
 import numpy as np
 
-# Try importing latex2sympy for MathVision
 try:
     from latex2sympy2_extended import latex2sympy
 except ImportError:
@@ -575,17 +574,26 @@ def process_results(excel_file, output_file, api_key, gpt_model="gpt-4", dataset
 
 if __name__ == "__main__":
     API_KEY = os.environ.get('OPENAI_API_KEY')
-    DATASET_TYPE = "MathVista"
+    
 
     input_files = [
-       "/home/minhle/projects/aip-btaati/minhle/VLMEvalKit/results/jan08/MathVista_MINI_major5_temp07/InternVL/T20260108_Gf5ccea51/InternVL_MathVista_MINI.xlsx",
-       "/home/minhle/projects/aip-btaati/minhle/VLMEvalKit/results/jan08/MathVista_MINI_major5_temp07_kdvz05/InternVL/T20260108_Gf5ccea51/InternVL_MathVista_MINI.xlsx"
+        "/home/minhle/projects/aip-btaati/minhle/VLMEvalKit/results/jan18/MathVision_MINI_major5_temp07_kdt_all075_l3/Qwen/T20260118_Gd7c2be35/Qwen_MathVision_MINI.xlsx",
+        "/home/minhle/projects/aip-btaati/minhle/VLMEvalKit/results/jan18/MathVision_MINI_major5_temp07_kdvz075/Qwen/T20260118_Gd7c2be35/Qwen_MathVision_MINI.xlsx",
+        "/home/minhle/projects/aip-btaati/minhle/VLMEvalKit/results/jan18/MathVision_MINI_major7_temp07/Qwen/T20260118_Gd7c2be35/Qwen_MathVision_MINI.xlsx",
     ]
     output_files = [
-        "/home/minhle/projects/aip-btaati/minhle/VLMEvalKit/results/jan08/MathVista_MINI_major5_temp07/InternVL/T20260108_Gf5ccea51/openai_InternVL_MathVista_MINI.csv",
-        "/home/minhle/projects/aip-btaati/minhle/VLMEvalKit/results/jan08/MathVista_MINI_major5_temp07_kdvz05/InternVL/T20260108_Gf5ccea51/openai_InternVL_MathVista_MINI.csv"
+        "/home/minhle/projects/aip-btaati/minhle/VLMEvalKit/results/jan18/MathVision_MINI_major5_temp07_kdt_all075_l3/Qwen/T20260118_Gd7c2be35/processed_Qwen_MathVision_MINI.csv",
+        "/home/minhle/projects/aip-btaati/minhle/VLMEvalKit/results/jan18/MathVision_MINI_major5_temp07_kdvz075/Qwen/T20260118_Gd7c2be35/processed_Qwen_MathVision_MINI.csv",
+        "/home/minhle/projects/aip-btaati/minhle/VLMEvalKit/results/jan18/MathVision_MINI_major7_temp07/Qwen/T20260118_Gd7c2be35/processed_Qwen_MathVision_MINI.csv",
+        
     ]
     
+    if 'mathvision' in input_files[0].lower():
+        DATASET_TYPE = "MathVision"
+    elif 'mathverse' in input_files[0].lower():
+        DATASET_TYPE = "MathVerse"
+    else:
+        DATASET_TYPE = "MathVista"
 
     for INPUT_FILE, OUTPUT_FILE in zip(input_files, output_files):
         print(f"\nProcessing file: {INPUT_FILE}")

@@ -575,10 +575,10 @@ def mcq_circular_eval(model, data, meta, nproc, result_file, dataset_name=None):
     return data_main
 
 
-def extract_characters_regex(s, choices=['(A)', '(B)', '(C)', '(D)', '(E)']):
+def extract_characters_regex(s, choices=['(A)', '(B)', '(C)', '(D)', '(E)', '(F)']):
     if type(s) is dict:
         s = ''
-    s = s.strip()
+    s = str(s).strip()
     answer_prefixes = [
         'The best answer is',
         'The correct answer is',
@@ -592,9 +592,9 @@ def extract_characters_regex(s, choices=['(A)', '(B)', '(C)', '(D)', '(E)']):
     for answer_prefix in answer_prefixes:
         s = s.replace(answer_prefix, '')
 
-    if len(s.split()) > 10 and not re.search('[ABCDE]', s):
+    if len(s.split()) > 10 and not re.search('[ABCDEF]', s):
         return ''
-    matches = re.search(r'[ABCDE]', s)
+    matches = re.search(r'[ABCDEF]', s)
     if matches is None:
         for choice in choices:
             if s.lower() in choice.lower():
