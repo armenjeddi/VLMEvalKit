@@ -705,8 +705,13 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                 cleaned_messages = []
                 cleaned_messages.append(message[0])
                 cleaned_messages.append(message[1])
+
+            elif "q-bench" in video_path.lower():
+                cleaned_messages = []
+                cleaned_messages.append(message[1])
+                cleaned_messages.append(message[2])
             
-            else: # video-MME
+            else: # video-MME or Video-TT
                 cleaned_messages = []
                 for i in range(len(message)):
                     if not (message[i]['type'] == 'text'):
