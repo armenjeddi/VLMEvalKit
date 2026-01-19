@@ -549,6 +549,8 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )
 
+        # import pdb; pdb.set_trace()
+
         responses = []
         for response in out:
             if self.post_process:
@@ -686,17 +688,36 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         return generated_text
 
     def generate_inner(self, message, dataset=None):
+        # import pdb; pdb.set_trace()
         if len(message) > 2: # basically in videos right now
-            cleaned_messages = []
+            video_path = None
             for i in range(len(message)):
                 if not (message[i]['type'] == 'text'):
-                    cleaned_messages.append(message[i])
-                if message[i]['type'] == 'text' and i == len(message) - 1:
+                    video_path = message[i]['value']
+                    break
 
-                    cleaned_messages.append(message[i])
+            if 'mvbench' in video_path.lower():
+                cleaned_messages = []
+                cleaned_messages.append(message[1])
+                cleaned_messages.append(message[2])
+
+            elif 'tempcompass' in video_path.lower():
+                cleaned_messages = []
+                cleaned_messages.append(message[0])
+                cleaned_messages.append(message[1])
+            
+            else: # video-MME
+                cleaned_messages = []
+                for i in range(len(message)):
+                    if not (message[i]['type'] == 'text'):
+                        cleaned_messages.append(message[i])
+                    if message[i]['type'] == 'text' and i == len(message) - 1:
+
+                        cleaned_messages.append(message[i])
 
             message = cleaned_messages
 
+        # import pdb; pdb.set_trace()
         if self.enable_thinking:
             for i in range(len(message)):
                 if message[i]['type'] == 'text':
