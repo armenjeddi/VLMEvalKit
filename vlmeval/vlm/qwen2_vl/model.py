@@ -710,7 +710,15 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                 cleaned_messages = []
                 cleaned_messages.append(message[1])
                 cleaned_messages.append(message[2])
-            
+
+            elif "videommmu" in video_path.lower():
+                cleaned_messages = []
+                cleaned_messages.append(message[0])
+                text_prompt = message[2]
+                removal = text_prompt['value'].find('Add `Answer:')
+                text_prompt['value'] = text_prompt['value'][:removal]
+                cleaned_messages.append(text_prompt)
+
             else: # video-MME or Video-TT
                 cleaned_messages = []
                 for i in range(len(message)):
