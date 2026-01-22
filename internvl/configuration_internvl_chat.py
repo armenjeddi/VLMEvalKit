@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
 
-from configuration_intern_vit import InternVisionConfig
+from .configuration_intern_vit import InternVisionConfig
 
 logger = logging.get_logger(__name__)
 

@@ -123,6 +123,10 @@ class InternVLChat(BaseModel):
                  #
                  use_lmdeploy=False,
                  use_postprocess=False,
+                 temperature=0.01,
+                 enable_kdvz=False,
+                 kdvz_ratio=0.0,
+                 num_return_sequences=1,
                  **kwargs):
 
         assert best_of_n >= 1
@@ -173,6 +177,13 @@ class InternVLChat(BaseModel):
 
         self.screen_parse = screen_parse
 
+        self.num_return_sequences = num_return_sequences
+
+        self.total_inference_time_in_seconds = 0
+        self.num_total_dataset_generated_tokens = 0
+        self.total_initial_input_visual_tokens = 0
+        self.total_input_text_tokens = 0
+
         if use_lmdeploy:
             from lmdeploy import TurbomindEngineConfig, PytorchEngineConfig, VisionConfig, pipeline
             engine_type = PytorchEngineConfig if "internvl3_5" in model_path.lower() else TurbomindEngineConfig
@@ -190,11 +201,11 @@ class InternVLChat(BaseModel):
             torch.cuda.set_device(0)
             self.device = 'cuda'
         else:
-            self.model = InternVLChatModel.from_pretrained(
+            self.model = AutoModel.from_pretrained(
                 model_path,
                 torch_dtype=torch.bfloat16,
                 load_in_8bit=load_in_8bit,
-                trust_remote_code=False,
+                trust_remote_code=True,
                 low_cpu_mem_usage=True,
                 device_map="auto").eval()
             self.device = 'cuda'
@@ -226,15 +237,18 @@ class InternVLChat(BaseModel):
         # kwargs_default = dict(do_sample=False, max_new_tokens=4096, top_p=None)
         # kwargs_default.update(kwargs)
         self.enable_thinking = kwargs.get('enable_thinking')
-        self.majority_vote = kwargs.get('majority_vote')
+
         self.generate_kwargs = dict(
             max_new_tokens=2048,
-            temperature=kwargs.get('temperature'),
-            top_p=None,
-            top_k=1,
+            temperature=temperature,
+
+            enable_kdvz=enable_kdvz,
+            kdvz_ratio=kdvz_ratio,
+            
+            num_return_sequences=num_return_sequences
         )
         
-        if self.generate_kwargs['temperature'] > 0.000001:
+        if temperature > 0.000001:
             self.generate_kwargs['do_sample'] = True
             self.generate_kwargs['top_p'] = 0.9
             self.generate_kwargs['top_k'] = None
@@ -505,11 +519,18 @@ class InternVLChat(BaseModel):
         elif self.version == 'V1.5':
             return self.generate_v1_5(message, dataset)
         elif self.version == 'V2.0':
-            num_responses = max(1, self.majority_vote)
+
+            start_time = time.time()
+            num_responses = max(1, self.num_return_sequences)
             responses = []
             for _ in range(num_responses):
                 response = self.generate_v2(message, dataset)
+                num_generated_tokens = self.tokenizer(response, return_tensors="pt").input_ids.shape[1]
+                self.num_total_dataset_generated_tokens += num_generated_tokens
+
                 responses.append(response.replace('\n', ' ').strip())
+
+            self.total_inference_time_in_seconds += time.time() - start_time
             return responses if num_responses > 1 else responses[0]
         else:
             raise ValueError(f'Unsupported version: {self.version}')

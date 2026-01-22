@@ -19,9 +19,9 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 from transformers import LlamaForCausalLM, Qwen2ForCausalLM, Qwen3ForCausalLM, Qwen3MoeForCausalLM
 
-from configuration_internvl_chat import InternVLChatConfig
-from conversation import get_conv_template
-from modeling_intern_vit import InternVisionModel, has_flash_attn
+from .configuration_internvl_chat import InternVLChatConfig
+from .conversation import get_conv_template
+from .modeling_intern_vit import InternVisionModel, has_flash_attn
 
 logger = logging.get_logger(__name__)
 
