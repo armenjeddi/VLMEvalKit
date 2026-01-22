@@ -219,7 +219,7 @@ def build_prompt(question, options, prediction):
         'You are provided with a question, several options, and an answer, '
         'and you need to find which option is most similar to the answer. '
         'If the meaning of all options are significantly different from the answer, output Z. '
-        'Your should output a single uppercase character in A, B, C, D (if they are valid options), and Z. \n'
+        'Your should output a single uppercase character in A, B, C, D, E, F, or more (depending on available options) (if they are valid options), and Z. \n'
         'Example 1: \n'
         'Question: What is the main object in image?\nOptions: A. teddy bear B. rabbit C. cat D. dog\n'
         'Answer: a cute teddy bear\nYour output: A\n'

@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Logs / runs
+*.log
+wandb/
+runs/
+outputs/
+checkpoints/
+tmp/
+
+# Model weights / large artifacts
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.npz
+*.npy
+*.h5
+*.tflite
+
+# Hugging Face / caches
+.cache/
+**/.cache/
+hf_cache/

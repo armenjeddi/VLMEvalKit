@@ -213,3 +213,6 @@ SenseNova*
 
 temp
 result*
+
+# Model checkpoints
+.safetensors

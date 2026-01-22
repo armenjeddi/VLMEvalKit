@@ -308,11 +308,13 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                 )
             self.llm = LLM(
                 model=self.model_path,
+                model_impl="transformers",
                 max_num_seqs=5,
                 max_model_len=32768,
                 limit_mm_per_prompt={"image": self.limit_mm_per_prompt},
                 tensor_parallel_size=tp_size,
                 gpu_memory_utilization=kwargs.get("gpu_utils", 0.9),
+                enforce_eager=True,
             )
 
         elif self.use_lmdeploy:
@@ -644,7 +646,7 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         if images:
             outputs = self.llm.generate(
                 {
-                    "prompt": text,
+                    "prompt": 1,
                     "multi_modal_data": {"image": images},
                 },
                 sampling_params=sampling_params,
@@ -662,30 +664,33 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                 sampling_params=sampling_params,
             )
 
+        responses = []
         for o in outputs:
-            generated_text = o.outputs[0].text
+            for i in range(len(o.outputs)):
+                generated_text = o.outputs[i].text
 
-        if self.post_process:
-            resp = generated_text.split('\\boxed{')[-1]
-            lt = len(resp)
-            counter, end = 1, None
-            for i in range(lt):
-                if resp[i] == '{':
-                    counter += 1
-                elif resp[i] == '}':
-                    counter -= 1
-                if counter == 0:
-                    end = i
-                    break
-                elif i == lt - 1:
-                    end = lt
-                    break
-            if end is not None:
-                generated_text = resp[:end]
+                if self.post_process:
+                    resp = generated_text.split('\\boxed{')[-1]
+                    lt = len(resp)
+                    counter, end = 1, None
+                    for i in range(lt):
+                        if resp[i] == '{':
+                            counter += 1
+                        elif resp[i] == '}':
+                            counter -= 1
+                        if counter == 0:
+                            end = i
+                            break
+                        elif i == lt - 1:
+                            end = lt
+                            break
+                    if end is not None:
+                        generated_text = resp[:end]
 
-        if self.verbose:
-            print(f'\033[32m{generated_text}\033[0m')
-        return generated_text
+                if self.verbose:
+                    print(f'\033[32m{generated_text}\033[0m')
+                responses.append(generated_text)
+        return responses
 
     def generate_inner(self, message, dataset=None):
         # import pdb; pdb.set_trace()
@@ -738,24 +743,26 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                     message[i]['value'] += "\nFirst output the thinking process in <think> </think> tags and then output the final answer in <answer> </answer> tags."
                     break
 
+        start_time = time.time()
+
         if self.use_vllm:
-            response = self.generate_inner_vllm(message, dataset=dataset)
+            responses = self.generate_inner_vllm(message, dataset=dataset)
         elif self.use_lmdeploy:
-            response = self.generate_inner_lmdeploy(message, dataset=dataset)
+            responses = self.generate_inner_lmdeploy(message, dataset=dataset)
         else:
-            start_time = time.time()
             responses = self.generate_inner_transformers(message, dataset=dataset)
-            self.total_inference_time_in_seconds += time.time() - start_time
-            final_answers = []
-            # import pdb; pdb.set_trace()
-            for response in responses:
-                num_generated_tokens = self.processor.tokenizer(response, return_tensors="pt").input_ids.shape[1]
-                self.num_total_dataset_generated_tokens += num_generated_tokens
-                if self.enable_thinking:
-                    response = self.extract_answer_from_thinking_response(response)
-                final_answers.append(response.replace('\n', ' ').strip())
-            
-            return final_answers[0] if len(final_answers) == 1 else final_answers
+
+        self.total_inference_time_in_seconds += time.time() - start_time
+        final_answers = []
+        # import pdb; pdb.set_trace()
+        for response in responses:
+            num_generated_tokens = self.processor.tokenizer(response, return_tensors="pt").input_ids.shape[1]
+            self.num_total_dataset_generated_tokens += num_generated_tokens
+            if self.enable_thinking:
+                response = self.extract_answer_from_thinking_response(response)
+            final_answers.append(response.replace('\n', ' ').strip())
+        
+        return final_answers[0] if len(final_answers) == 1 else final_answers
 
 
 class Qwen2VLChatAguvis(Qwen2VLChat):
