@@ -27,7 +27,6 @@ unset_all() {
 }
 
 set_defaults() {
-    model_path="${model_path:-$QWEN25_7B}"
     model_name="${model_name:-Qwen}"
     data="${data:-MME}"
     device="${device:-0}"
