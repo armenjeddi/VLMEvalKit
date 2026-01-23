@@ -331,17 +331,30 @@ class InternVLChatModel(PreTrainedModel):
             attention_mask=attention_mask,
             **generation_config
         )
-        response = tokenizer.batch_decode(generation_output, skip_special_tokens=True)[0]
-        response = response.split(template.sep.strip())[0].strip()
-        history.append((question, response))
-        if return_history:
-            return response, history
+        responses = tokenizer.batch_decode(generation_output, skip_special_tokens=True)
+        if len(responses) == 1:
+            response = responses[0]
+            response = response.split(template.sep.strip())[0].strip()
+            history.append((question, response))
+            if return_history:
+                return response, history
+            else:
+                query_to_print = query.replace(IMG_CONTEXT_TOKEN, '')
+                query_to_print = query_to_print.replace(f'{IMG_START_TOKEN}{IMG_END_TOKEN}', '<image>')
+                if verbose:
+                    print(query_to_print, response)
+                return response
         else:
-            query_to_print = query.replace(IMG_CONTEXT_TOKEN, '')
-            query_to_print = query_to_print.replace(f'{IMG_START_TOKEN}{IMG_END_TOKEN}', '<image>')
-            if verbose:
-                print(query_to_print, response)
-            return response
+            responses = [r.split(template.sep.strip())[0].strip() for r in responses]
+            history.append((question, responses[0]))
+            if return_history:
+                return responses, history
+            else:
+                query_to_print = query.replace(IMG_CONTEXT_TOKEN, '')
+                query_to_print = query_to_print.replace(f'{IMG_START_TOKEN}{IMG_END_TOKEN}', '<image>')
+                if verbose:
+                    print(query_to_print, responses)
+                return responses
 
     @torch.no_grad()
     def generate(

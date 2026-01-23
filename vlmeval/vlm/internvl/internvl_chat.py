@@ -480,6 +480,7 @@ class InternVLChat(BaseModel):
             response_list.append(response)
 
         if self.best_of_n > 1:
+            assert self.generate_kwargs['num_return_sequences'] == 1, "num_return_sequences should be 1"
             response_list = self.reward_model.select_best_response(
                 tokenizer=self.reward_tokenizer,
                 question=prompt,
@@ -488,23 +489,40 @@ class InternVLChat(BaseModel):
                 num_patches_list=num_patches_list,
             )
         response = response_list[0]
+        if self.generate_kwargs['num_return_sequences'] == 1:
+            if dataset is not None and not listinstr(['WeMath'], dataset):
+                if use_mpo_prompt:
+                    response = mpo_post_processing(response, dataset)
+                elif self.use_cot and self.use_postprocess:
+                    response = extract_boxed_content(response)
 
-        if dataset is not None and not listinstr(['WeMath'], dataset):
-            if use_mpo_prompt:
-                response = mpo_post_processing(response, dataset)
-            elif self.use_cot and self.use_postprocess:
-                response = extract_boxed_content(response)
+            if dataset is not None and DATASET_TYPE(dataset) == 'GUI' and self.screen_parse:
+                # Parse the bounding box coordinates from the response
+                response = parse_bbox_internvl(response)
+                # Normalize the coordinates to the range [0, 1]
+                if isinstance(response, list):
+                    response = [item / 1000 for item in response]
+                    # Convert the coordinates to the format required by the GUI
+                    response = f"x={response[0]}, y={response[1]}"
 
-        if dataset is not None and DATASET_TYPE(dataset) == 'GUI' and self.screen_parse:
-            # Parse the bounding box coordinates from the response
-            response = parse_bbox_internvl(response)
-            # Normalize the coordinates to the range [0, 1]
-            if isinstance(response, list):
-                response = [item / 1000 for item in response]
-                # Convert the coordinates to the format required by the GUI
-                response = f"x={response[0]}, y={response[1]}"
+            return response
+        else:
+            if dataset is not None and not listinstr(['WeMath'], dataset):
+                if use_mpo_prompt:
+                    response = [mpo_post_processing(r, dataset) for r in response]
+                elif self.use_cot and self.use_postprocess:
+                    response = [extract_boxed_content(r) for r in response]
+            if dataset is not None and DATASET_TYPE(dataset) == 'GUI' and self.screen_parse:
+                # Parse the bounding box coordinates from the response
+                response = [parse_bbox_internvl(r) for r in response]
+                # Normalize the coordinates to the range [0, 1]
+                for idx in range(len(response)):
+                    if isinstance(response[idx], list):
+                        response[idx] = [item / 1000 for item in response[idx]]
+                        # Convert the coordinates to the format required by the GUI
+                        response[idx] = f"x={response[idx][0]}, y={response[idx][1]}"
 
-        return response
+            return response
 
     def generate_inner(self, message, dataset=None):
         self.set_max_num(dataset)
@@ -522,13 +540,12 @@ class InternVLChat(BaseModel):
 
             start_time = time.time()
             num_responses = max(1, self.num_return_sequences)
-            responses = []
-            for _ in range(num_responses):
-                response = self.generate_v2(message, dataset)
-                num_generated_tokens = self.tokenizer(response, return_tensors="pt").input_ids.shape[1]
-                self.num_total_dataset_generated_tokens += num_generated_tokens
+            responses = self.generate_v2(message, dataset)
 
-                responses.append(response.replace('\n', ' ').strip())
+            for idx in range(num_responses):
+                num_generated_tokens = self.tokenizer(responses[idx], return_tensors="pt").input_ids.shape[1]
+                self.num_total_dataset_generated_tokens += num_generated_tokens
+                responses[idx] = responses[idx].replace('\n', ' ').strip()
 
             self.total_inference_time_in_seconds += time.time() - start_time
             return responses if num_responses > 1 else responses[0]
