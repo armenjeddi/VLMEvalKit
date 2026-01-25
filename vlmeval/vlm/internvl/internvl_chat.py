@@ -126,6 +126,9 @@ class InternVLChat(BaseModel):
                  temperature=0.01,
                  enable_kdvz=False,
                  kdvz_ratio=0.0,
+                 enable_kd_tokens=False,
+                 tokens_ratio=0.0,
+                 tokens_prune_layers=None,
                  num_return_sequences=1,
                  **kwargs):
 
@@ -244,6 +247,10 @@ class InternVLChat(BaseModel):
 
             enable_kdvz=enable_kdvz,
             kdvz_ratio=kdvz_ratio,
+            
+            enable_kd_tokens=enable_kd_tokens,
+            tokens_ratio=tokens_ratio,
+            tokens_prune_layers=tokens_prune_layers,
             
             num_return_sequences=num_return_sequences
         )

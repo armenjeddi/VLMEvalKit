@@ -23,6 +23,7 @@ from typing import Callable, Optional, Union
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from ...activations import ACT2FN
 from ...cache_utils import Cache, DynamicCache
@@ -362,6 +363,10 @@ class Qwen3Model(Qwen3PreTrainedModel):
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        img_mask: Optional[torch.LongTensor] = None, # tensor of booleans, specifying where the visual tokens are
+        enable_kd_tokens: Optional[bool] = False,
+        tokens_ratio: Optional[float] = 0.0,
+        tokens_prune_layers: Optional[str] = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> BaseModelOutputWithPast:
         if (input_ids is None) ^ (inputs_embeds is not None):
@@ -405,8 +410,9 @@ class Qwen3Model(Qwen3PreTrainedModel):
 
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
+        prefilling = hidden_states.shape[1] > 1
 
-        for decoder_layer in self.layers[: self.config.num_hidden_layers]:
+        for i, decoder_layer in enumerate(self.layers[: self.config.num_hidden_layers]):
             hidden_states = decoder_layer(
                 hidden_states,
                 attention_mask=causal_mask_mapping[decoder_layer.attention_type],
@@ -417,6 +423,56 @@ class Qwen3Model(Qwen3PreTrainedModel):
                 position_embeddings=position_embeddings,
                 **kwargs,
             )
+
+            if enable_kd_tokens and i in [int(x) for x in tokens_prune_layers.split(",")] and prefilling:
+                is_img = img_mask.bool()
+                vision_indices = torch.nonzero(is_img, as_tuple=True)[0]
+                txt_indices = torch.nonzero(~is_img, as_tuple=True)[0]
+
+                number_of_vision_tokens = len(vision_indices)
+
+                n_keep_vis = int(number_of_vision_tokens * (1.0 - tokens_ratio))
+                
+                module = getattr(decoder_layer, "self_attn", None)
+                cache_layer = past_key_values.layers[module.layer_idx]
+
+                norm_keys = F.normalize(cache_layer.keys[:1], p=2, dim=-1)
+
+                vision_keys = norm_keys[:, :, vision_indices, :]
+                anchor = norm_keys.mean(2, keepdim=True)
+
+                scores = -F.cosine_similarity(vision_keys, anchor, dim=-1)
+                scores = scores.mean(dim=(0, 1))
+                
+                vis_keep_idx_relative = scores.topk(n_keep_vis, largest=True).indices
+                vis_keep_idx_global = vision_indices[vis_keep_idx_relative]
+                # txt_idx = torch.arange(number_of_vision_tokens, seq_len, device=hidden_states.device)
+                
+                keep_idx, _ = torch.sort(torch.cat([vis_keep_idx_global, txt_indices], dim=0))
+                
+                hidden_states = hidden_states[:, keep_idx, :] # prune hidden states
+
+                cache_position = cache_position[keep_idx]
+                # text_position_ids = text_position_ids[:, keep_idx]
+                position_ids = position_ids[:, keep_idx]
+
+                img_mask = img_mask[keep_idx]
+                
+                mask_kwargs = {
+                    "config": self.config,
+                    "input_embeds": hidden_states,
+                    "attention_mask": None, # assuming default causal
+                    "cache_position": cache_position,
+                    "past_key_values": past_key_values,
+                    "position_ids": position_ids,
+                }
+                causal_mask_mapping = {
+                    "full_attention": create_causal_mask(**mask_kwargs),
+                }
+                if self.has_sliding_layers:
+                    causal_mask_mapping["sliding_attention"] = create_sliding_window_causal_mask(**mask_kwargs)
+                
+                position_embeddings = self.rotary_emb(hidden_states, position_ids)                
 
         hidden_states = self.norm(hidden_states)
         return BaseModelOutputWithPast(
@@ -453,6 +509,10 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
+        img_mask: Optional[torch.LongTensor] = None,
+        enable_kd_tokens: Optional[bool] = False,
+        tokens_ratio: Optional[float] = 0.0,
+        tokens_prune_layers: Optional[str] = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> CausalLMOutputWithPast:
         r"""
@@ -485,6 +545,10 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
             cache_position=cache_position,
+            img_mask=img_mask,
+            enable_kd_tokens=enable_kd_tokens,
+            tokens_ratio=tokens_ratio,
+            tokens_prune_layers=tokens_prune_layers,
             **kwargs,
         )
 

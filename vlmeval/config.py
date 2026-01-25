@@ -1017,10 +1017,10 @@ internvl3 = {
         enable_kdvz=get_bool_env("enable_kdvz", False),
         kdvz_ratio=float(os.environ.get("kdvz_ratio", 0.0)),
 
-        # enable_kd_tokens=get_bool_env("enable_kd_tokens", False),
+        enable_kd_tokens=get_bool_env("enable_kd_tokens", False),
         # tokens_anchor=os.environ.get("tokens_anchor", "all"),
-        # tokens_ratio=float(os.environ.get("tokens_ratio", 0.0)),
-        # tokens_prune_layers=os.environ.get("tokens_prune_layers", "3"),
+        tokens_ratio=float(os.environ.get("tokens_ratio", 0.0)),
+        tokens_prune_layers=os.environ.get("tokens_prune_layers", "3"),
 
     ),
     "InternVL3-1B": partial(
@@ -1114,6 +1114,26 @@ internvl3_5 = {
 }
 
 qwen3vl_series = {
+    "Qwen3": partial(
+        Qwen2VLChat,
+        model_path=os.environ.get("model_path", "Qwen/Qwen3-VL-8B-Instruct"),
+        min_pixels=1280 * 28 * 28,
+        max_pixels=16384 * 28 * 28,
+        use_custom_prompt=False,
+        enable_thinking=get_bool_env("enable_thinking", True),
+
+        # num_return_sequences=int(os.environ.get("num_return_sequences", 1)),
+        # temperature=float(os.environ.get("temperature", 0.7)),
+
+        # enable_kdvz=get_bool_env("enable_kdvz", False),
+        # kdvz_ratio=float(os.environ.get("kdvz_ratio", 0.0)),
+
+        enable_kd_tokens=get_bool_env("enable_kd_tokens", False),
+        tokens_anchor=os.environ.get("tokens_anchor", "all"),
+        tokens_ratio=float(os.environ.get("tokens_ratio", 0.0)),
+        tokens_prune_layers=os.environ.get("tokens_prune_layers", "3"),
+
+    ),
     "Qwen3-VL-235B-A22B-Instruct": partial(
         Qwen3VLChat,
         model_path="Qwen/Qwen3-VL-235B-A22B-Instruct",

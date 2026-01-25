@@ -354,6 +354,9 @@ class InternVLChatModel(PreTrainedModel):
             output_hidden_states: Optional[bool] = None,
             enable_kdvz: Optional[bool] = False,
             kdvz_ratio: Optional[float] = 0.0,
+            enable_kd_tokens: Optional[bool] = False,
+            tokens_ratio: Optional[float] = 0.0,
+            tokens_prune_layers: Optional[str] = None,
             **generate_kwargs,
     ) -> torch.LongTensor:
 
@@ -424,6 +427,11 @@ class InternVLChatModel(PreTrainedModel):
             generation_config=generation_config,
             output_hidden_states=output_hidden_states,
             use_cache=True,
+            img_mask=selected,
+            enable_kd_tokens=enable_kd_tokens,
+            tokens_ratio=tokens_ratio,
+            tokens_prune_layers=tokens_prune_layers,
+
             **generate_kwargs,
         )
 
