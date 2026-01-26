@@ -437,8 +437,10 @@ Based on your observations, select the best option that accurately addresses the
 """
     TYPE = 'Video-MCQ'
 
-    def __init__(self, dataset='MVBench_MP4', nframe=0, fps=-1):
+    def __init__(self, dataset='MVBench_MP4', nframe=0, fps=-1, limit=None):
         super().__init__(dataset=dataset, nframe=nframe, fps=fps)
+        if limit is not None and limit > 0:
+            self.data = self.data.head(limit).reset_index(drop=True)
 
     @classmethod
     def supported_datasets(cls):

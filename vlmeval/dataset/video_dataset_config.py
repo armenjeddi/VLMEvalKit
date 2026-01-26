@@ -11,7 +11,11 @@ vcrbench_dataset = {
 
 mmbench_video_dataset = {
     'MMBench_Video_8frame_nopack': partial(MMBenchVideo, dataset='MMBench-Video', nframe=8, pack=False),
+    'MMBench_Video_8frame_nopack_1000': partial(MMBenchVideo, dataset='MMBench-Video', nframe=8, pack=False, limit=1000),
+    'MMBench_Video_8frame_nopack_500': partial(MMBenchVideo, dataset='MMBench-Video', nframe=8, pack=False, limit=500),
     'MMBench_Video_8frame_pack': partial(MMBenchVideo, dataset='MMBench-Video', nframe=8, pack=True),
+    'MMBench_Video_8frame_pack_1000': partial(MMBenchVideo, dataset='MMBench-Video', nframe=8, pack=True, limit=1000),
+    'MMBench_Video_8frame_pack_500': partial(MMBenchVideo, dataset='MMBench-Video', nframe=8, pack=True, limit=500),
     'MMBench_Video_16frame_nopack': partial(MMBenchVideo, dataset='MMBench-Video', nframe=16, pack=False),
     'MMBench_Video_64frame_nopack': partial(MMBenchVideo, dataset='MMBench-Video', nframe=64, pack=False),
     'MMBench_Video_64frame_pack': partial(MMBenchVideo, dataset='MMBench-Video', nframe=64, pack=True),
@@ -21,10 +25,10 @@ mmbench_video_dataset = {
 
 mvbench_dataset = {
     'MVBench_8frame': partial(MVBench, dataset='MVBench', nframe=8),
-    'MVBench_64frame': partial(MVBench, dataset='MVBench', nframe=64),
+    'MVBench_64frame': partial(MVBench, dataset='MVBench', nframe=64, limit=500),
     # MVBench not support fps, but MVBench_MP4 does
     'MVBench_MP4_8frame': partial(MVBench_MP4, dataset='MVBench_MP4', nframe=8),
-    'MVBench_MP4_1fps': partial(MVBench_MP4, dataset='MVBench_MP4', fps=1.0),
+    'MVBench_MP4_1fps': partial(MVBench_MP4, dataset='MVBench_MP4', fps=1.0, limit=500),
 }
 
 tamperbench_dataset = {
@@ -35,7 +39,7 @@ tamperbench_dataset = {
 
 videomme_dataset = {
     'Video-MME_8frame': partial(VideoMME, dataset='Video-MME', nframe=8),
-    'Video-MME_64frame': partial(VideoMME, dataset='Video-MME', nframe=64),
+    'Video-MME_64frame': partial(VideoMME, dataset='Video-MME', nframe=64, limit=500),
     'Video-MME_8frame_subs': partial(VideoMME, dataset='Video-MME', nframe=8, use_subtitle=True),
     'Video-MME_1fps': partial(VideoMME, dataset='Video-MME', fps=1.0),
     'Video-MME_0.5fps': partial(VideoMME, dataset='Video-MME', fps=0.5),
@@ -44,7 +48,9 @@ videomme_dataset = {
 
 videommmu_dataset = {
     'VideoMMMU_8frame': partial(VideoMMMU, dataset='VideoMMMU', nframe=8),
-    'VideoMMMU_64frame': partial(VideoMMMU, dataset='VideoMMMU', nframe=64),
+    'VideoMMMU_8frame_50': partial(VideoMMMU, dataset='VideoMMMU', nframe=8, limit=50),
+    'VideoMMMU_8frame_100': partial(VideoMMMU, dataset='VideoMMMU', nframe=8, limit=100),
+    'VideoMMMU_64frame': partial(VideoMMMU, dataset='VideoMMMU', nframe=64, question_type='multiple-choice'),
     'VideoMMMU_1fps': partial(VideoMMMU, dataset='VideoMMMU', fps=1.0),
     'VideoMMMU_0.5fps': partial(VideoMMMU, dataset='VideoMMMU', fps=0.5),
 }
@@ -66,9 +72,12 @@ mlvu_dataset = {
 
 tempcompass_dataset = {
     'TempCompass_8frame': partial(TempCompass, dataset='TempCompass', nframe=8),
-    'TempCompass_64frame': partial(TempCompass, dataset='TempCompass', nframe=64),
+    'TempCompass_64frame': partial(TempCompass, dataset='TempCompass_MCQ', nframe=64, limit=500),
     'TempCompass_1fps': partial(TempCompass, dataset='TempCompass', fps=1.0),
-    'TempCompass_0.5fps': partial(TempCompass, dataset='TempCompass', fps=0.5)
+    'TempCompass_0.5fps': partial(TempCompass, dataset='TempCompass', fps=0.5),
+    # MCQ-only variants (multi-choice questions only, no captioning or yes/no)
+    'TempCompass_MCQ_8frame': partial(TempCompass_MCQ, dataset='TempCompass_MCQ', nframe=8),
+    'TempCompass_MCQ_64frame': partial(TempCompass_MCQ, dataset='TempCompass_MCQ', nframe=64, limit=500),
 }
 
 # In order to reproduce the experimental results in CGbench paper,
@@ -98,7 +107,8 @@ cgbench_dataset = {
         CGBench_MCQ_Grounding,
         dataset='CG-Bench_MCQ_Grounding',
         nframe=32,
-        use_subtitle=True
+        use_subtitle=True,
+        limit=500
     ),
     'CGBench_OpenEnded_8frame': partial(
         CGBench_OpenEnded,
@@ -171,9 +181,9 @@ video_mmlu_dataset = {
 }
 
 video_tt_dataset = {
-    'Video_TT_16frame': partial(VideoTT, dataset='Video-TT', nframe=16),
-    'Video_TT_32frame': partial(VideoTT, dataset='Video-TT', nframe=32),
-    'Video_TT_64frame': partial(VideoTT, dataset='Video-TT', nframe=64),
+    'Video_TT_16frame': partial(VideoTT, dataset='Video-TT', nframe=16, limit=500),
+    'Video_TT_32frame': partial(VideoTT, dataset='Video-TT', nframe=32, limit=500),
+    'Video_TT_64frame': partial(VideoTT, dataset='Video-TT', nframe=64, limit=500),
 }
 
 video_holmes_dataset = {
