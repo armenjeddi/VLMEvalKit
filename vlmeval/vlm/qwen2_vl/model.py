@@ -217,9 +217,11 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             print('The total number of video tokens might become too large, resulting in an overly long input sequence. We recommend lowering **total_pixels** to below **24576 × 28 × 28**.')  # noqa: E501
 
         if temperature > 0.01 and num_return_sequences > 1:
+            do_sample=True
             top_p = 0.9
             top_k = None
         else:
+            do_sample=False
             top_p = 0.001
             top_k = 1
 
@@ -230,6 +232,7 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         self.enable_thinking = kwargs.get('enable_thinking', True)
         self.generate_kwargs = dict(
             max_new_tokens=self.max_new_tokens,
+            do_sample=do_sample,
             top_p=top_p,
             top_k=top_k,
             temperature=temperature,
@@ -269,7 +272,7 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                 raise err
             MODEL_CLS = Qwen2_5OmniForConditionalGeneration
             self.processor = Qwen2_5OmniProcessor.from_pretrained(model_path)
-        elif listinstr(['2.5', '2_5', 'qwen25', 'mimo'], model_path.lower()):
+        elif listinstr(['2.5', '2_5', 'qwen25', 'mimo', 'openvlthinker', 'vision-r1', 'vl-rethinker'], model_path.lower()):
             from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
             MODEL_CLS = Qwen2_5_VLForConditionalGeneration
             self.processor = AutoProcessor.from_pretrained(model_path)
@@ -327,10 +330,16 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             torch.cuda.set_device(0)
             self.device = 'cuda'
         else:
-            self.model = MODEL_CLS.from_pretrained(
-                model_path, torch_dtype='auto', device_map="auto", attn_implementation='flash_attention_2'
-            )
-            self.model.eval()
+            if listinstr(['2.5', '2_5', 'qwen25'], model_path.lower()):
+                self.model = MODEL_CLS.from_pretrained(
+                    model_path, torch_dtype='auto', device_map="auto", attn_implementation='flash_attention_2'
+                )
+                self.model.eval()
+            else:
+                self.model = MODEL_CLS.from_pretrained(
+                    model_path, dtype='bfloat16', device_map="auto", attn_implementation='flash_attention_2'
+                )
+                self.model.eval()
 
         from pprint import pprint
         print("Generate kwargs:")

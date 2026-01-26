@@ -6,6 +6,11 @@ date_tag=$(date +"%b%d" | tr '[:upper:]' '[:lower:]')
 QWEN25_7B="Qwen/Qwen2.5-VL-7B-Instruct"
 INTERNVL="OpenGVLab/InternVL3_5-4B"
 
+VISIONR1="Osilly/Vision-R1-7B"
+OPENVL="ydeng9/OpenVLThinker-7B"
+VLRETHINKER="TIGER-Lab/VL-Rethinker-7B"
+
+
 
 mode="${1:-seq}"
 if [[ "$mode" != "seq" && "$mode" != "con" ]]; then
