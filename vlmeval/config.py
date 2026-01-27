@@ -1534,6 +1534,8 @@ qwen2vl_series = {
         tokens_anchor=os.environ.get("tokens_anchor", "all"),
         tokens_ratio=float(os.environ.get("tokens_ratio", 0.0)),
         tokens_prune_layers=os.environ.get("tokens_prune_layers", "3"),
+        enable_policy=get_bool_env("enable_policy", False),
+        policy_path=os.environ.get("policy_path", None),
 
     ),
 
@@ -1556,6 +1558,8 @@ qwen2vl_series = {
         tokens_prune_layers=os.environ.get("tokens_prune_layers", "4"),
 
         num_return_sequences=int(os.environ.get("num_return_sequences", 1)),
+        enable_policy=get_bool_env("enable_policy", False),
+        policy_path=os.environ.get("policy_path", None),
     ),
 
 

@@ -9,6 +9,7 @@ import re
 import time
 
 import torch
+from policy.policy_model import PolicyModel
 from transformers import StoppingCriteria
 
 from ..base import BaseModel
@@ -206,6 +207,8 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         post_process: bool = False,  # if True, will try to only extract stuff in the last \boxed{}.
         verbose: bool = False,
         use_audio_in_video: bool = False,
+        enable_policy = False,
+        policy_path = None,
         **kwargs,
     ):
         super().__init__(use_custom_prompt=use_custom_prompt)
@@ -344,7 +347,12 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         from pprint import pprint
         print("Generate kwargs:")
         pprint(self.generate_kwargs)
-
+        self.enable_policy = enable_policy
+        if enable_policy:
+            assert policy_path is not None and policy_path != ''
+            print('Policy is enabled. Init policy model with checkpoint', policy_path)
+            self.policy_model = PolicyModel(policy_path, device=self.model.device)
+            self.policy_model.eval()
         torch.cuda.empty_cache()
 
     def _prepare_content(self, inputs: list[dict[str, str]], dataset: str | None = None) -> list[dict[str, str]]:
@@ -547,6 +555,37 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             self.generate_kwargs['use_audio_in_video'] = self.use_audio_in_video
             self.generate_kwargs['return_audio'] = False
 
+        if self.enable_policy:
+            # breakpoint()
+            if 'pixel_values' in inputs:
+                embeds, _, _ = self.model.model.get_image_features(
+                    pixel_values=inputs["pixel_values"],
+                    image_grid_thw=inputs.get("image_grid_thw"),
+                    enable_kdvz=self.generate_kwargs.get("enable_kdvz", False),
+                    enable_visionzip=self.generate_kwargs.get("enable_visionzip", False),
+                )
+            elif 'pixel_values_videos' in inputs:
+                embeds, _, _ = self.model.model.get_image_features(
+                    pixel_values=inputs["pixel_values_videos"],
+                    image_grid_thw=inputs.get("image_grid_thw"),
+                    enable_kdvz=self.generate_kwargs.get("enable_kdvz", False),
+                    enable_visionzip=self.generate_kwargs.get("enable_visionzip", False),
+                )
+            else:
+                raise ValueError()
+            embeds = torch.stack(embeds, dim=0)
+            K = self.policy_model(embeds)
+            self.generate_kwargs['num_return_sequences'] = K
+            if K > 1:
+                self.generate_kwargs['temperature'] = 0.7
+                self.generate_kwargs['do_sample'] = True
+                self.generate_kwargs['top_p'] = 0.9
+                self.generate_kwargs['top_k'] = None
+            else:
+                self.generate_kwargs['temperature'] = 0.01
+                self.generate_kwargs['do_sample'] = False
+                self.generate_kwargs['top_p'] = 0.001
+                self.generate_kwargs['top_k'] = 1
 
         generated_ids = self.model.generate(
             **inputs,

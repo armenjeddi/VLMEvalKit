@@ -26,7 +26,7 @@ unset_all() {
             enable_kd_kvcache kvcache_anchor kvcache_ratio kvcache_prune_after_layer \
             enable_kd_tokens tokens_anchor tokens_ratio tokens_prune_layers \
             enable_kd_decode decode_anchor decode_ratio decode_prune_window decode_prune_after_layer \
-            data model_name device run_id SPLIT_THINK; do
+            data model_name device run_id SPLIT_THINK enable_policy; do
         unset "$v" || true
     done
 }
@@ -70,7 +70,9 @@ run_one() {
     if [[ "$enable_kd_decode" == "True" ]]; then
         config_tags+=("kdd_${decode_anchor}${decode_ratio//./}_w${decode_prune_window}")
     fi
-
+    if [[ "$enable_policy" == "True" ]]; then
+        config_tags+=("policy")
+    fi
     # Fallback for base run
     if [ ${#config_tags[@]} -eq 0 ]; then config_tags=("base"); fi
     
@@ -93,7 +95,7 @@ run_one() {
         enable_visionzip visionzip_ratio enable_kdvz kdvz_ratio \
         enable_kd_kvcache kvcache_anchor kvcache_ratio kvcache_prune_after_layer \
         enable_kd_tokens tokens_anchor tokens_ratio tokens_prune_layers \
-        enable_kd_decode decode_anchor decode_ratio decode_prune_window decode_prune_after_layer
+        enable_kd_decode decode_anchor decode_ratio decode_prune_window decode_prune_after_layer enable_policy
 
     CUDA_VISIBLE_DEVICES="$device" python run.py \
         --data "$data" \
@@ -104,6 +106,7 @@ run_one() {
 
 
 export enable_thinking="True"
+export policy_path="policy/best_checkpoint.pt"
 experiments=(
 
     "device=0 data=MathVista_MINI model_name=Qwen" \
