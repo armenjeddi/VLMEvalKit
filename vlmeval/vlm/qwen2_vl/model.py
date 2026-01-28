@@ -228,6 +228,8 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             top_p = 0.001
             top_k = 1
 
+        if enable_policy: enable_kdvz=True
+
         self.total_inference_time_in_seconds = 0
         self.num_total_dataset_generated_tokens = 0
         self.total_initial_input_visual_tokens = 0
@@ -241,6 +243,8 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             temperature=temperature,
             repetition_penalty=repetition_penalty,
             use_cache=use_kv_cache,
+
+            enable_policy=enable_policy,
             
             enable_kdvz=enable_kdvz,
             kdvz_ratio=kdvz_ratio,
@@ -575,6 +579,7 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                 raise ValueError()
             embeds = torch.stack(embeds, dim=0)
             K = self.policy_model(embeds)
+            # with open('/users/minh.le1/policy_log.txt', 'a', encoding='utf-8') as f: f.write(f"Policy K: {str(int(K))}\n")
             self.generate_kwargs['num_return_sequences'] = K
             if K > 1:
                 self.generate_kwargs['temperature'] = 0.7
@@ -799,6 +804,8 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
             responses = self.generate_inner_lmdeploy(message, dataset=dataset)
         else:
             responses = self.generate_inner_transformers(message, dataset=dataset)
+        
+        # with open('/users/minh.le1/policy_log.txt', 'a', encoding='utf-8') as f: f.write(f"Responses: {str(responses)}\n\n")
 
         self.total_inference_time_in_seconds += time.time() - start_time
         final_answers = []

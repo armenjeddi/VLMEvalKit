@@ -1448,6 +1448,8 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         cache_position: Optional[torch.LongTensor] = None,
         second_per_grid_ts: Optional[torch.Tensor] = None,
 
+        enable_policy: Optional[bool] = None,
+
         enable_visionzip: Optional[bool] = None,
         visionzip_ratio: Optional[float] = None,
         enable_kdvz: Optional[bool] = None,
@@ -1599,18 +1601,25 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
             del contextual_tokens, hidden_states_filtered, hidden_to_merge,aggregated_hidden
 
         
-        if select_pixel and enable_kdvz:
+        if select_pixel and (enable_kdvz or enable_policy):
             # inputs_embeds shape: 1, num_tokens, embed_dim
             # attn_key shape: num_heads, num_tokens, key_dim
             num_tokens = attn_key.size(1) // batch_size
             attn_key = attn_key[:, :num_tokens, :]
-            n_keep = int(num_tokens * (1.0 - kdvz_ratio))
+            
             norm_keys = F.normalize(attn_key, p=2, dim=-1)
             
             anchor = norm_keys.mean(dim=1, keepdim=True)
             scores = -F.cosine_similarity(norm_keys, anchor, dim=-1)
             scores = scores.mean(dim=0)
-            
+
+            if enable_policy:
+                policy_ratio = (scores < -0.7071).sum() / scores.shape[0]
+                n_keep = int(num_tokens * (1.0 - policy_ratio))
+            else:
+                n_keep = int(num_tokens * (1.0 - kdvz_ratio))
+
+            # with open('/users/minh.le1/policy_log.txt', 'a', encoding='utf-8') as f: f.write(f"Policy ratio: {str(float(policy_ratio))}\n")
             keep_idx = scores.topk(n_keep, largest=True).indices
             keep_idx, _ = keep_idx.sort()
 
@@ -1771,6 +1780,8 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         second_per_grid_ts: Optional[torch.Tensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
 
+        enable_policy: Optional[bool] = None,
+
         enable_visionzip: Optional[bool] = None,
         visionzip_ratio: Optional[float] = None,
         enable_kdvz: Optional[bool] = None,
@@ -1859,6 +1870,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             output_hidden_states=output_hidden_states,
             return_dict=True,
             cache_position=cache_position,
+            enable_policy=enable_policy,
             enable_visionzip=enable_visionzip,
             visionzip_ratio=visionzip_ratio,
             enable_kdvz=enable_kdvz,
@@ -1914,6 +1926,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         image_grid_thw=None,
         video_grid_thw=None,
         second_per_grid_ts=None,
+        enable_policy: Optional[bool] = None,
         enable_visionzip: Optional[bool] = None,
         visionzip_ratio: Optional[float] = None,
         enable_kdvz: Optional[bool] = None,
@@ -1948,6 +1961,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
             video_grid_thw=video_grid_thw,
             second_per_grid_ts=second_per_grid_ts,
             use_cache=use_cache,
+            enable_policy=enable_policy,
             enable_visionzip=enable_visionzip,
             visionzip_ratio=visionzip_ratio,
             enable_kdvz=enable_kdvz,
